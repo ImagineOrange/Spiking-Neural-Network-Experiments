@@ -1,1 +1,1 @@
-![network_connections_sparse](https://github.com/user-attachments/assets/2cf211c1-37af-411c-80ce-ceace1bba86b)
+![clipped_small](https://github.com/user-attachments/assets/fee5d93d-233e-4405-a015-d074a1fd1ae4)
