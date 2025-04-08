@@ -388,8 +388,8 @@ def plot_psth_and_raster(activity_record, stim_times=None, bin_size=10, dt=0.1,
     if stim_times:
         for stim_time in stim_times:
             # Draw vertical lines across both plots
-            ax_psth.axvline(x=stim_time, color='#1dd1a1', linewidth=1, alpha=0.7)
-            ax_raster.axvline(x=stim_time, color='#1dd1a1', linewidth=1, alpha=0.7)
+            ax_psth.axvline(x=stim_time, color='#1dd1a1', linewidth=.2, alpha=0.1)
+            ax_raster.axvline(x=stim_time, color='#1dd1a1', linewidth=.2, alpha=0.1)
     
     # Style the plots for dark theme
     for ax in [ax_psth, ax_raster]:
@@ -509,7 +509,7 @@ def Layered_plot_activity_and_layer_psth(network, activity_record, layer_indices
         # Mark stimulation times
         if stim_times: # Should ideally be stimulation_record['pulse_starts']
             for stim_time in stim_times:
-                ax_psth.axvline(x=stim_time, color='lime', linestyle='--', linewidth=1.0, alpha=0.6)
+                ax_psth.axvline(x=stim_time, color='lime', linestyle='--', linewidth=.2, alpha=0.1)
 
         # Set x-label only for the bottom-most plot
         if i == num_layers - 1:
@@ -608,7 +608,7 @@ def Layered_plot_layer_wise_raster(network, activity_record, layer_indices, dt=0
         # Mark stimulation times
         if stim_times: # Should ideally be stimulation_record['pulse_starts']
             for stim_time in stim_times:
-                ax_raster.axvline(x=stim_time, color='lime', linestyle='--', linewidth=0.8, alpha=0.6)
+                ax_raster.axvline(x=stim_time, color='lime', linestyle='--', linewidth=0.3, alpha=0.3)
 
         ax_raster.grid(True, alpha=0.15, axis='x') # Subtle vertical grid lines
 

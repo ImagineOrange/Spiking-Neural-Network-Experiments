@@ -753,16 +753,24 @@ if __name__ == "__main__":
     print(f"--- Running {N_CLASSES}-Class MNIST GA SNN ---")
     print(f"Target Digits: {TARGET_CLASSES} -> Mapped Indices: {list(range(N_CLASSES))}")
 
-    # GA Parameters
-    POPULATION_SIZE = 100       # Number of individuals (weight sets) in the population
-    NUM_GENERATIONS = 200       # How many generations to run the evolution
-    MUTATION_RATE = 0.10       # Probability of a single weight being mutated
-    MUTATION_STRENGTH = 0.005  # Std dev of noise added during mutation
-    CROSSOVER_RATE = 0.7       # Probability of two parents performing crossover
-    ELITISM_COUNT = 4          # Number of best individuals carried directly to next gen
-    TOURNAMENT_SIZE = 5        # Number of individuals competing in selection tournament
-    FITNESS_EVAL_EXAMPLES = 100 # Number of examples per fitness evaluation (passed to func)
-    TEST_SET_EXAMPLES = 100    # Number of examples for final testing
+    # --- Population and Duration ---
+    POPULATION_SIZE = 100       # Number of individuals (weight sets) in the population (Kept same initially)
+    NUM_GENERATIONS = 200       # Increased: How many generations to run the evolution (was 200)
+
+    # --- Mutation ---
+    MUTATION_RATE = 0.10        # Probability of a single weight being mutated (Kept same initially)
+    MUTATION_STRENGTH = 0.05    # Increased: Std dev of noise added during mutation (was 0.005) - Allow larger jumps
+
+    # --- Crossover ---
+    CROSSOVER_RATE = 0.7        # Probability of two parents performing crossover (Kept same)
+
+    # --- Selection ---
+    ELITISM_COUNT = 2           # Decreased: Number of best individuals carried directly to next gen (was 4) - Reduce convergence pressure
+    TOURNAMENT_SIZE = 3         # Decreased: Number of individuals competing in selection tournament (was 5) - Lower selection pressure
+
+    # --- Evaluation ---
+    FITNESS_EVAL_EXAMPLES = 100 # Increased: Number of examples per fitness evaluation (was 100) - Reduce fitness noise
+    TEST_SET_EXAMPLES = 100     # Number of examples for final testing (Kept same)
 
     # Parallelization Config
     N_CORES = 11 # Number of CPU cores for parallel fitness evaluation (adjust as needed, 0 or -1 uses all)
