@@ -3,12 +3,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 plt.style.use('dark_background') # Apply style early
 import time # To measure execution time
-import matplotlib.gridspec as gridspec # For creating complex subplot layouts
 import random
-import inspect # Import inspect module for introspection
 from collections import deque # Used in LayeredNeuronalNetwork
 from tqdm import tqdm # Progress bar
-import copy # For deep copying chromosomes/networks
 import os # For creating directories
 import multiprocessing # For parallelization
 
@@ -134,7 +131,7 @@ def Layered_run_unified_simulation(network: LayeredNeuronalNetworkVectorized, # 
 
     ongoing_stimulations = {} # Tracks {neuron_idx: end_time} for managing pulse durations
     stim_interval_steps = int(stim_interval / dt) if stim_interval is not None else None
-    stimulation_population = list(stim_target_indices) if stim_target_indices is not None else list(range(network.n_neurons))
+    stimulation_population = set(stim_target_indices) if stim_target_indices is not None else set(range(network.n_neurons))
     if not stimulation_population: no_stimulation = True
 
     # --- Simulation Loop ---
@@ -188,10 +185,10 @@ def Layered_run_unified_simulation(network: LayeredNeuronalNetworkVectorized, # 
                  #     stimulation_record['neurons'].append(list(newly_stimulated_indices_this_step))
 
         # --- Update Ongoing Stimulations (Turns off expired, applies conductance for active) ---
-        expired_stims = []
-        for neuron_idx, end_time in list(ongoing_stimulations.items()):
+        expired_stims = set()
+        for neuron_idx, end_time in ongoing_stimulations.items():
             if current_time >= end_time:
-                expired_stims.append(neuron_idx) # Mark for removal
+                expired_stims.add(neuron_idx) # Mark for removal
                 # Ensure conductance is set to 0 if it expires this step
                 current_stim_conductances[neuron_idx] = 0.0
             else:
@@ -451,7 +448,6 @@ class GeneticAlgorithm:
         return population
 
     def evaluate_population(self, n_cores, show_progress=True):
-         if n_cores <= 0: n_cores = multiprocessing.cpu_count()
          tasks = [(self.population[i],) + self.fitness_func_args for i in range(self.population_size)]
          # print(f"Evaluating population using {min(n_cores, self.population_size)} cores...") # Verbose
          start_eval_time = time.time()
@@ -660,7 +656,7 @@ if __name__ == "__main__":
     print(f"Target Digits: {TARGET_CLASSES} -> Mapped Indices: {list(range(N_CLASSES))}")
 
     POPULATION_SIZE = 100
-    NUM_GENERATIONS = 20 # Reduced for quick testing, use more for real runs (e.g., 200)
+    NUM_GENERATIONS = 200 # Reduced for quick testing, use more for real runs (e.g., 200)
     MUTATION_RATE = 0.10
     MUTATION_STRENGTH = 0.001
     CROSSOVER_RATE = 0.7
@@ -729,7 +725,7 @@ if __name__ == "__main__":
     print("Creating base SNN structure (vectorized)...")
     try:
         network_creation_args = {
-            "n_layers_list": list(layers_config_global),
+            "n_layers_list": layers_config_global,
             "inhibitory_fraction": inhib_frac_global, # Will be used inside
             "connection_probs": conn_probs_global,
             "neuron_params_dict": neuron_config_global, # Pass the dict
