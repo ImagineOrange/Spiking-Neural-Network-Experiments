@@ -656,7 +656,7 @@ if __name__ == "__main__":
     print(f"Target Digits: {TARGET_CLASSES} -> Mapped Indices: {list(range(N_CLASSES))}")
 
     POPULATION_SIZE = 100
-    NUM_GENERATIONS = 1 # Reduced for quick testing, use more for real runs (e.g., 200)
+    NUM_GENERATIONS = 200 # Reduced for quick testing, use more for real runs (e.g., 200)
     MUTATION_RATE = 0.10
     MUTATION_STRENGTH = 0.05
     CROSSOVER_RATE = 0.7
