@@ -657,14 +657,13 @@ if __name__ == "__main__":
 
     POPULATION_SIZE = 100
     NUM_GENERATIONS = 200 # Reduced for quick testing, use more for real runs (e.g., 200)
-    MUTATION_RATE = 0.10
+    MUTATION_RATE = 0.15
     MUTATION_STRENGTH = 0.001
     CROSSOVER_RATE = 0.7
     ELITISM_COUNT = 2
     TOURNAMENT_SIZE = 7
-    FITNESS_EVAL_EXAMPLES = 100 # Reduced for quick testing (e.g., 100)
+    FITNESS_EVAL_EXAMPLES = 200 # Reduced for quick testing (e.g., 100)
     TEST_SET_EXAMPLES = 1000
-
     N_CORES = os.cpu_count() - 1 if os.cpu_count() > 1 else 1 # Use almost all cores
     print(f"Using {N_CORES} cores for parallel evaluation.")
 
@@ -815,73 +814,150 @@ if __name__ == "__main__":
     print(f"\n--- GA Evolution Complete (or interrupted) ---")
     print(f"Total GA time: {ga_end_time - start_overall_time:.2f}s")
 
-    # --- Get Best Chromosome Found (Unchanged) ---
-    best_chromosome = None; best_fitness_final = -np.inf
+   # --- Get Best Chromosome Found ---
+    best_chromosome = None
+    best_fitness_final = -np.inf
     if len(ga.fitness_scores) > 0 and np.any(np.isfinite(ga.fitness_scores)):
+         # Use nanargmax to handle potential NaNs from failed evaluations
          valid_scores = np.where(np.isneginf(ga.fitness_scores), np.nan, ga.fitness_scores)
-         if np.any(np.isfinite(valid_scores)):
+         if np.any(np.isfinite(valid_scores)): # Check if there are any valid scores
               final_best_idx = np.nanargmax(valid_scores)
               if final_best_idx < len(ga.population):
                   best_chromosome = ga.population[final_best_idx]
-                  best_fitness_final = valid_scores[final_best_idx]
+                  best_fitness_final = valid_scores[final_best_idx] # Use the valid score
                   print(f"Best fitness found during evolution (on eval set): {best_fitness_final:.4f}")
-                  weights_save_path = os.path.join(output_dir, f"best_snn_weights_{N_CLASSES}class_sparse.npy") # Generic name
-                  map_save_path = os.path.join(output_dir, f"connection_map_{N_CLASSES}class.npy")
+
+                  # --- SAVE ALL PERTINENT NETWORK INFORMATION ---
+                  print(f"\n--- Saving Best Network State to Directory: {output_dir} ---")
+                  # Define base filenames
+                  base_filename = f"best_snn_{N_CLASSES}class_sparse"
+                  weights_save_path = os.path.join(output_dir, f"{base_filename}_weights.npy")
+                  map_save_path = os.path.join(output_dir, f"{base_filename}_connection_map.npy")
+                  delays_save_path = os.path.join(output_dir, f"{base_filename}_delays.npy")         # <<< NEW
+                  inhib_save_path = os.path.join(output_dir, f"{base_filename}_inhibitory_status.npy") # <<< NEW
+                  config_save_path = os.path.join(output_dir, f"{base_filename}_config.json")        # <<< NEW
+
                   try:
-                      np.save(weights_save_path, best_chromosome); np.save(map_save_path, np.array(connection_map_global, dtype=object))
-                      print(f"Saved best sparse weights to {weights_save_path}"); print(f"Saved connection map to {map_save_path}")
-                  except Exception as e: print(f"Error saving weights or map: {e}")
-              else: print("Warning: Best fitness index is out of bounds.")
-         else: print("Warning: All fitness scores were invalid. Cannot determine best chromosome.")
-    else: print("Warning: No valid fitness scores available. Cannot determine best chromosome.")
+                      # 1. Save Best Weights (Chromosome)
+                      np.save(weights_save_path, best_chromosome)
+                      print(f"Saved best weights vector to {weights_save_path}")
+
+                      # 2. Save Connection Map
+                      np.save(map_save_path, np.array(connection_map_global, dtype=object))
+                      print(f"Saved connection map to {map_save_path}")
+
+                      # 3. Extract and Save Delays corresponding to the map
+                      # Retrieve delays from the base_network created before the GA loop
+                      # (Assuming base_network is accessible here and holds the structure)
+                      if 'base_network' in locals() and hasattr(base_network, 'delays'):
+                          delay_vector = np.zeros(len(connection_map_global))
+                          for idx, (u, v) in enumerate(connection_map_global):
+                              if 0 <= u < base_network.n_neurons and 0 <= v < base_network.n_neurons:
+                                  delay_vector[idx] = base_network.delays[u, v]
+                              else:
+                                  print(f"Warning: Invalid index ({u},{v}) in connection map when extracting delays.")
+                                  delay_vector[idx] = sim_dt_global # Default to dt if error
+                          np.save(delays_save_path, delay_vector)
+                          print(f"Saved delay vector to {delays_save_path}")
+                      else:
+                           print("Error: Could not find 'base_network' or its 'delays' attribute to save delays.")
+
+                      # 4. Save Inhibitory Status Array
+                      if 'base_network' in locals() and hasattr(base_network, 'is_inhibitory'):
+                          inhibitory_status_array = base_network.is_inhibitory
+                          np.save(inhib_save_path, inhibitory_status_array)
+                          print(f"Saved inhibitory status array to {inhib_save_path}")
+                      else:
+                           print("Error: Could not find 'base_network' or 'is_inhibitory' attribute to save status.")
+
+                      # 5. Save Key Configuration Parameters
+                      config_to_save = {
+                          "layers_config": layers_config_global,
+                          "inhibitory_fraction": inhib_frac_global,
+                          "neuron_config": neuron_config_global,
+                          "connection_probabilities": conn_probs_global,
+                          "base_transmission_delay": network_creation_args['base_transmission_delay'], # Get from creation dict
+                          "simulation_dt": sim_dt_global,
+                          "random_seed": master_seed,
+                          "n_classes": N_CLASSES,
+                          "downsample_factor": downsample_factor_global,
+                          "mnist_stim_duration_ms": mnist_stim_duration_global,
+                          "max_frequency_hz": max_freq_hz_global,
+                          # Add any other critical parameters used during structure creation or simulation setup
+                      }
+                      import json # Make sure json is imported
+                      with open(config_save_path, 'w') as f:
+                          json.dump(config_to_save, f, indent=4)
+                      print(f"Saved configuration parameters to {config_save_path}")
+
+                  except Exception as e:
+                      print(f"Error saving network state files: {e}")
+                      # Optional: Clean up partially saved files if error occurs?
+                  # --- END SAVING BLOCK ---
+
+              else:
+                  print("Warning: Best fitness index is out of bounds for population.")
+         else:
+             print("Warning: All fitness scores were invalid (-inf or NaN). Cannot determine best chromosome.")
+    else:
+         print("Warning: No valid fitness scores available. Cannot determine best chromosome.")
 
     # --- Evaluate Best Chromosome on Test Set (MODIFIED call to create_snn_structure) ---
+    # (This section remains largely the same, but now the evaluation script
+    #  will eventually load the saved state instead of relying on parameters here)
     if best_chromosome is not None:
          print(f"\n--- Evaluating best weights on {TEST_SET_EXAMPLES} filtered test examples ---")
+         # ... (rest of the testing code in genetic_experiment_vectorized.py) ...
+         # ... (This part is less critical now as the primary goal is saving the state) ...
+         # ... (It still uses the *locally* created test_network for this internal test) ...
          try:
              # Recreate the network structure (will be vectorized)
+             # Note: This test uses the configuration params, not the saved state.
+             # The *real* test will happen in the modified evaluation script loading the saved state.
              test_network, test_layer_indices, _, test_connection_map = create_snn_structure(**network_creation_args)
              test_network.reset_all()
              test_network.set_weights_sparse(best_chromosome, test_connection_map)
 
-             test_accuracies = []
-             if len(test_indices_pool) > 0:
-                 actual_test_examples = min(TEST_SET_EXAMPLES, len(test_indices_pool))
-                 test_indices_final = np.random.choice(test_indices_pool, actual_test_examples, replace=False)
-             else: print("Warning: No test examples available."); test_indices_final = []; actual_test_examples = 0
+             # ... (rest of testing loop as before) ...
+             test_accuracies = [] #
+             if len(test_indices_pool) > 0: #
+                 actual_test_examples = min(TEST_SET_EXAMPLES, len(test_indices_pool)) #
+                 test_indices_final = np.random.choice(test_indices_pool, actual_test_examples, replace=False) #
+             else: print("Warning: No test examples available."); test_indices_final = []; actual_test_examples = 0 #
 
-             mnist_stimulator_test = SNNStimulator(total_time_ms=mnist_stim_duration_global, max_freq_hz=max_freq_hz_global)
-             test_loop_iterator = tqdm(test_indices_final, desc="Testing Best Weights", ncols=80)
-             correct_test_predictions = 0
+             mnist_stimulator_test = SNNStimulator(total_time_ms=mnist_stim_duration_global, max_freq_hz=max_freq_hz_global) #
+             test_loop_iterator = tqdm(test_indices_final, desc="Testing Best Weights", ncols=80) #
+             correct_test_predictions = 0 #
 
-             for filt_idx in test_loop_iterator:
+             for filt_idx in test_loop_iterator: #
                  try:
-                      mnist_original_image = filtered_images_global[filt_idx].reshape(28,28)
-                      true_original_label = filtered_labels_global[filt_idx]
-                      true_mapped_label = label_map_global[true_original_label]
-                      if downsample_factor_global > 1: mnist_image = downsample_image(mnist_original_image, downsample_factor_global)
-                      else: mnist_image = mnist_original_image
-                      mnist_spike_times = mnist_stimulator_test.generate_spikes(mnist_image)
+                      mnist_original_image = filtered_images_global[filt_idx].reshape(28,28) #
+                      true_original_label = filtered_labels_global[filt_idx] #
+                      true_mapped_label = label_map_global[true_original_label] #
+                      if downsample_factor_global > 1: mnist_image = downsample_image(mnist_original_image, downsample_factor_global) #
+                      else: mnist_image = mnist_original_image #
+                      mnist_spike_times = mnist_stimulator_test.generate_spikes(mnist_image) #
 
-                      activity_record = run_snn_simulation(
+                      activity_record = run_snn_simulation( #
                           test_network, sim_duration_global, sim_dt_global, mnist_spike_times, stim_config_global
                       )
 
-                      predicted_label = calculate_prediction(
+                      predicted_label = calculate_prediction( #
                           activity_record, test_layer_indices, dt=sim_dt_global,
                           stim_duration_ms=mnist_stim_duration_global, n_classes=N_CLASSES
                       )
 
-                      if predicted_label != -1:
-                          is_correct = (predicted_label == true_mapped_label)
-                          if is_correct: correct_test_predictions += 1
-                 except Exception as e: print(f"\nWarning: Error during test sim for index {filt_idx}: {e}. Skipping."); continue
+                      if predicted_label != -1: #
+                          is_correct = (predicted_label == true_mapped_label) #
+                          if is_correct: correct_test_predictions += 1 #
+                 except Exception as e: print(f"\nWarning: Error during test sim for index {filt_idx}: {e}. Skipping."); continue #
 
-             final_test_accuracy = correct_test_predictions / actual_test_examples if actual_test_examples > 0 else 0.0
-             print(f"\nFinal Accuracy on Filtered Test Set ({actual_test_examples} examples): {final_test_accuracy:.4f}")
+             final_test_accuracy = correct_test_predictions / actual_test_examples if actual_test_examples > 0 else 0.0 #
+             print(f"\nFinal Accuracy on Filtered Test Set ({actual_test_examples} examples): {final_test_accuracy:.4f}") #
 
-         except Exception as e: print(f"\nError during final test evaluation: {e}"); final_test_accuracy = None
-    else: print("\nSkipping final test evaluation as no best chromosome was found."); final_test_accuracy = None
+         except Exception as e: print(f"\nError during final test evaluation: {e}"); final_test_accuracy = None #
+    else: print("\nSkipping final test evaluation as no best chromosome was found."); final_test_accuracy = None #
+
 
     overall_end_time = time.time()
     print(f"Total script execution time: {overall_end_time - start_overall_time:.2f}s")
