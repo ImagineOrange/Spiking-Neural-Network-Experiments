@@ -662,12 +662,12 @@ if __name__ == "__main__":
     POPULATION_SIZE = 100
     NUM_GENERATIONS = 20 # Reduced for quick testing, use more for real runs (e.g., 200)
     MUTATION_RATE = 0.10
-    MUTATION_STRENGTH = 0.05
+    MUTATION_STRENGTH = 0.001
     CROSSOVER_RATE = 0.7
     ELITISM_COUNT = 2
-    TOURNAMENT_SIZE = 3
-    FITNESS_EVAL_EXAMPLES = 50 # Reduced for quick testing (e.g., 100)
-    TEST_SET_EXAMPLES = 100
+    TOURNAMENT_SIZE = 7
+    FITNESS_EVAL_EXAMPLES = 100 # Reduced for quick testing (e.g., 100)
+    TEST_SET_EXAMPLES = 1000
 
     N_CORES = os.cpu_count() - 1 if os.cpu_count() > 1 else 1 # Use almost all cores
     print(f"Using {N_CORES} cores for parallel evaluation.")
