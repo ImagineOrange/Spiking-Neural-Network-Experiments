@@ -656,9 +656,9 @@ if __name__ == "__main__":
     print(f"Target Digits: {TARGET_CLASSES} -> Mapped Indices: {list(range(N_CLASSES))}")
 
     POPULATION_SIZE = 100
-    NUM_GENERATIONS = 200 # Reduced for quick testing, use more for real runs (e.g., 200)
+    NUM_GENERATIONS = 300 # Reduced for quick testing, use more for real runs (e.g., 200)
     MUTATION_RATE = 0.15
-    MUTATION_STRENGTH = 0.001
+    MUTATION_STRENGTH = 0.0005
     CROSSOVER_RATE = 0.7
     ELITISM_COUNT = 2
     TOURNAMENT_SIZE = 7
