@@ -628,7 +628,14 @@ def Layered_plot_network_connections_sparse(network, pos, stimulated_neurons=Non
 # --- END plot_network_connections_sparse ---
 
 
-# Function to visualize network activity on a sparse grid layout
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from tqdm import tqdm
+
+# Ensure plt.style.use('dark_background') is potentially set earlier in the file or calling script
+
+# --- CORRECTED/DYNAMIC Function ---
 def Layered_visualize_activity_layout_grid(network, pos, activity_record, dt=0.1, stim_record=None,
                                    grid_resolution=(100, 150), save_path="3_layer_layout_grid_activity.gif",
                                    max_frames=1000, fps=30):
@@ -636,9 +643,11 @@ def Layered_visualize_activity_layout_grid(network, pos, activity_record, dt=0.1
     Creates a GIF animation showing neural activity spreading across the network layout.
     Neurons are mapped to a sparse grid based on their positions.
     Colors indicate neuron type (inhibitory=blue, excitatory=red) and stimulation state (yellow/green).
+    MODIFIED: Dynamically handles both vectorized (has network.is_inhibitory) and
+              non-vectorized (has network.neurons list) network objects.
 
     Args:
-        network: The network object.
+        network: The network object (vectorized or non-vectorized).
         pos (dict): Dictionary mapping neuron indices to (x, y) positions.
         activity_record (list): List of spiking neuron indices per time step.
         dt (float): Simulation time step (ms).
@@ -649,14 +658,18 @@ def Layered_visualize_activity_layout_grid(network, pos, activity_record, dt=0.1
         fps (int): Frames per second for the output GIF.
     """
     print(f"Generating sparse grid activity animation (up to {max_frames} frames)...")
-    n_neurons = network.n_neurons
+    # Safely get total neuron count
+    n_neurons = getattr(network, 'n_neurons', 0)
     total_steps = len(activity_record)
     if total_steps == 0:
         print("Warning: No activity recorded.")
         return None
+    if n_neurons == 0:
+        print("Warning: Network has 0 neurons.")
+        return None
 
     # Validate position data
-    if not pos or not any(isinstance(p, (tuple, list)) and len(p) == 2 for p in pos.values()):
+    if not pos or not isinstance(pos, dict) or not any(isinstance(p, (tuple, list)) and len(p) == 2 for p in pos.values()):
         print("Warning: Invalid or empty position data (pos), cannot generate layout grid animation.")
         return None
 
@@ -664,13 +677,15 @@ def Layered_visualize_activity_layout_grid(network, pos, activity_record, dt=0.1
     print(f"Mapping {n_neurons} neurons onto a {grid_rows}x{grid_cols} sparse grid...")
 
     # --- Map neuron positions to sparse grid coordinates ---
-    all_nodes = list(network.graph.nodes())
-    nodes_with_pos = [n for n in all_nodes if n in pos and isinstance(pos[n], (tuple, list)) and len(pos[n]) == 2]
+    # Ensure we only try to map nodes that exist in the network graph if available
+    nodes_to_map = list(getattr(network, 'graph', {}).nodes()) or list(range(n_neurons))
+    nodes_with_pos = [n for n in nodes_to_map if n in pos and isinstance(pos[n], (tuple, list)) and len(pos[n]) == 2]
+
     if not nodes_with_pos:
-        print("Warning: No nodes found with valid position data.")
+        print("Warning: No nodes found with valid position data in the provided 'pos' dictionary.")
         return None
 
-    # Get position ranges for normalization
+    # Get position ranges for normalization using only valid positions
     xs = [pos[n][0] for n in nodes_with_pos]
     ys = [pos[n][1] for n in nodes_with_pos]
     if not xs or not ys:
@@ -689,167 +704,145 @@ def Layered_visualize_activity_layout_grid(network, pos, activity_record, dt=0.1
     # Create mappings: neuron ID -> grid (row, col), and grid (row, col) -> list of neuron IDs
     neuron_to_sparse_grid_pos = {}
     grid_to_neuron_map = {}
-    for i in nodes_with_pos:
+    for i in nodes_with_pos: # Iterate only over nodes confirmed to have positions
          x, y = pos[i]
          # Normalize and scale position to grid coordinates
          col = int(((x - min_x) / x_range) * (grid_cols - 1)) if x_range > 1e-9 else grid_cols // 2
          row = int(((max_y - y) / y_range) * (grid_rows - 1)) if y_range > 1e-9 else grid_rows // 2 # Invert y for image origin
-         # Clamp coordinates to grid bounds
          col = max(0, min(grid_cols - 1, col))
          row = max(0, min(grid_rows - 1, row))
          neuron_to_sparse_grid_pos[i] = (row, col)
          grid_coord = (row, col)
-         # Store mapping from grid coordinate back to neuron ID(s) at that location
          if grid_coord not in grid_to_neuron_map: grid_to_neuron_map[grid_coord] = []
          grid_to_neuron_map[grid_coord].append(i)
 
-    # Create a boolean mask for inhibitory neurons on the grid
+    # --- Dynamically determine inhibitory status and create mask ---
     inhibitory_mask = np.zeros((grid_rows, grid_cols), dtype=bool)
-    for i in all_nodes:
-         # Check if neuron exists and is inhibitory
-         if i < len(network.neurons) and network.neurons[i] and network.neurons[i].is_inhibitory:
-              if i in neuron_to_sparse_grid_pos:
-                  row, col = neuron_to_sparse_grid_pos[i]
-                  inhibitory_mask[row, col] = True # Mark grid cell as containing inhibitory neuron(s)
+    is_vectorized = hasattr(network, 'is_inhibitory') and isinstance(network.is_inhibitory, np.ndarray)
+    is_non_vectorized = hasattr(network, 'neurons') and isinstance(network.neurons, list)
+
+    for i in range(n_neurons): # Iterate through all possible neuron indices
+         is_inhib = False # Default
+         try:
+             if is_vectorized:
+                 if i < len(network.is_inhibitory): is_inhib = network.is_inhibitory[i]
+             elif is_non_vectorized:
+                 if i < len(network.neurons) and network.neurons[i] is not None:
+                      neuron_obj = network.neurons[i]
+                      if hasattr(neuron_obj, 'is_inhibitory'): is_inhib = neuron_obj.is_inhibitory
+             # else: Fallback handled by is_inhib = False
+
+             if is_inhib and i in neuron_to_sparse_grid_pos:
+                 row, col = neuron_to_sparse_grid_pos[i]
+                 inhibitory_mask[row, col] = True
+         except (IndexError, AttributeError) as e:
+              # Silently handle potential errors during status check for robusteness
+              # print(f"Warning: Error checking inhibitory status for neuron {i}: {e}")
+              pass # Keep is_inhib as False
 
     # --- Frame Sampling ---
-    # Downsample activity record if it exceeds max_frames for performance
     if total_steps > max_frames:
-        indices = np.linspace(0, total_steps - 1, max_frames, dtype=int) # Evenly sample frame indices
+        indices = np.linspace(0, total_steps - 1, max_frames, dtype=int)
         sampled_activity = [activity_record[i] for i in indices]
-        sampled_times = [i * dt for i in indices] # Corresponding times for sampled frames
-    else: # Use all frames
+        sampled_times = [i * dt for i in indices]
+    else:
         sampled_activity = activity_record
         sampled_times = [i * dt for i in range(total_steps)]
-        indices = np.arange(total_steps) # Original indices
+        indices = np.arange(total_steps)
 
     # --- Process Stimulation Record ---
-    # Create a lookup for which neurons are actively stimulated at each original time step
-    stim_active_at_step = {} # {step_index: {neuron_id1, neuron_id2, ...}}
-    any_stim_active_flag = [False] * total_steps # Flag for each step if *any* stimulation is active
+    stim_active_at_step = {}
+    any_stim_active_flag = [False] * total_steps
     if stim_record and 'pulse_starts' in stim_record and 'neurons' in stim_record:
         pulse_starts = stim_record['pulse_starts']
         neurons_per_start = stim_record['neurons']
-        pulse_duration_ms = stim_record.get('pulse_duration_ms', dt) # Get pulse duration
-        pulse_duration_steps = max(1, int(pulse_duration_ms / dt)) # Duration in steps
-
-        # Map stimulation periods to time steps
+        pulse_duration_ms = stim_record.get('pulse_duration_ms', dt)
+        pulse_duration_steps = max(1, int(pulse_duration_ms / dt))
         for i, start_time in enumerate(pulse_starts):
              start_step = int(start_time / dt)
              end_step = start_step + pulse_duration_steps
-             # Ensure neuron list for this pulse exists and is iterable
              if i < len(neurons_per_start) and isinstance(neurons_per_start[i], (list, set)):
                  neurons_in_pulse = neurons_per_start[i]
-                 # For each step within the pulse duration
                  for step_index in range(start_step, min(end_step, total_steps)):
-                      if step_index not in stim_active_at_step:
-                          stim_active_at_step[step_index] = set()
-                      # Add the neurons stimulated in this pulse to the set for this step
+                      if step_index not in stim_active_at_step: stim_active_at_step[step_index] = set()
                       stim_active_at_step[step_index].update(neurons_in_pulse)
-                      any_stim_active_flag[step_index] = True # Mark this step as having active stimulation
+                      any_stim_active_flag[step_index] = True
 
     # --- Animation Setup ---
-    # Calculate aspect ratio for figure size
     aspect_ratio = grid_cols / grid_rows if grid_rows > 0 else 1
     fig_height = 8; fig_width = fig_height * aspect_ratio
-    # Create figure and axes
     fig, ax = plt.subplots(figsize=(max(8, fig_width), fig_height), facecolor='#1a1a1a')
-    ax.set_facecolor('#1a1a1a'); ax.set_xticks([]); ax.set_yticks([]) # Dark background, no ticks
+    ax.set_facecolor('#1a1a1a'); ax.set_xticks([]); ax.set_yticks([])
 
-    # Initialize grid for visualization (stores intensity/color)
-    activity_grid = np.zeros((grid_rows, grid_cols)) # Not directly used for color, maybe intensity buffer
     activity_colors = np.zeros((grid_rows, grid_cols, 3)) # RGB color array
-
-    # Create the initial image display
     img = ax.imshow(activity_colors, interpolation='nearest', origin='upper', vmin=0, vmax=1, aspect='auto')
-    # Add title and stimulation text placeholders
     title = ax.set_title(f"Time: 0.0 ms", color='white', fontsize=14)
     stim_text = ax.text(0.01, 0.98, "", transform=ax.transAxes, color='lime', fontsize=10, verticalalignment='top', fontweight='bold')
+    prev_activity_grid = np.zeros((grid_rows, grid_cols)) # Visual intensity state
 
-    # Store the visual state (intensity) of the grid from the previous frame for decay effect
-    prev_activity_grid = np.zeros((grid_rows, grid_cols))
-
-    # Progress bar for animation generation
-    pbar = tqdm(total=len(sampled_activity), desc="Generating GIF Frames")
+    # Progress bar
+    pbar = tqdm(total=len(sampled_activity), desc="Generating GIF Frames", leave=False)
 
     # --- Animation Update Function ---
     def update_sparse_grid(frame_idx):
         """Updates the grid visualization for a single animation frame."""
-        nonlocal prev_activity_grid # Allow modification of the previous state grid
-        pbar.update(1) # Update progress bar
+        nonlocal prev_activity_grid
+        pbar.update(1)
 
-        original_step_index = indices[frame_idx] # Get the original simulation step index
-        active_neuron_indices_this_frame = set(sampled_activity[frame_idx]) # Neurons spiking in this frame
-        current_time = sampled_times[frame_idx] # Time corresponding to this frame
+        original_step_index = indices[frame_idx]
+        # Ensure activity record items are treated as sets for efficient lookup
+        active_neuron_indices_this_frame = set(sampled_activity[frame_idx])
+        current_time = sampled_times[frame_idx]
 
-        # --- Decay previous visual intensity ---
-        # Apply exponential decay to the visual intensity from the previous frame
-        current_visual_intensity = prev_activity_grid * 0.75 # Decay factor (e.g., 0.75)
+        current_visual_intensity = prev_activity_grid * 0.75 # Decay factor
 
-        # --- Add new spike intensity ---
-        # Create a temporary grid to mark spikes happening *in this specific frame*
         spike_intensity_grid = np.zeros((grid_rows, grid_cols))
         for idx in active_neuron_indices_this_frame:
              if idx in neuron_to_sparse_grid_pos:
                  row, col = neuron_to_sparse_grid_pos[idx]
-                 spike_intensity_grid[row, col] = 1.0 # Set spiking cells to full intensity
+                 spike_intensity_grid[row, col] = 1.0
 
-        # --- Determine Colors ---
-        colors = np.zeros((grid_rows, grid_cols, 3)) # Initialize color grid
-        # Get the set of neurons being actively stimulated at this original time step
+        colors = np.zeros((grid_rows, grid_cols, 3))
         neurons_stimulated_this_frame = stim_active_at_step.get(original_step_index, set())
 
-        # Iterate through each cell in the sparse grid
         for r in range(grid_rows):
              for c in range(grid_cols):
-                 is_spiking = spike_intensity_grid[r, c] > 0.01 # Check if spiking in this frame
-                 neuron_ids_at_coord = grid_to_neuron_map.get((r,c), []) # Get neuron(s) at this grid cell
-                 # Check if any neuron at this location is being stimulated
+                 is_spiking = spike_intensity_grid[r, c] > 0.01
+                 neuron_ids_at_coord = grid_to_neuron_map.get((r,c), [])
                  is_stimulated = any(nid in neurons_stimulated_this_frame for nid in neuron_ids_at_coord)
 
-                 if is_spiking: # Priority 1: Spiking
-                     if is_stimulated: # Spiking while stimulated -> Bright Green/Yellow
-                         colors[r, c, :] = [0.5, 1.0, 0.5] # Lime green
-                     elif inhibitory_mask[r, c]: # Inhibitory spiking -> Bright Blue
-                         colors[r, c, 2] = 1.0
-                     else: # Excitatory spiking -> Bright Red
-                         colors[r, c, 0] = 1.0
-                     # Reset visual intensity to max for spiking cells
-                     current_visual_intensity[r, c] = 1.0
-                 elif is_stimulated: # Priority 2: Stimulated (but not spiking) -> Dim Yellow
-                     # Use decayed intensity but ensure some minimum visibility
+                 if is_spiking:
+                     if is_stimulated: colors[r, c, :] = [0.5, 1.0, 0.5] # Lime green
+                     elif inhibitory_mask[r, c]: colors[r, c, 2] = 1.0 # Bright Blue
+                     else: colors[r, c, 0] = 1.0 # Bright Red
+                     current_visual_intensity[r, c] = 1.0 # Reset intensity
+                 elif is_stimulated:
                      decayed_stim_intensity = max(0.1, current_visual_intensity[r, c])
-                     colors[r, c, :] = [0.6 * decayed_stim_intensity, 0.6 * decayed_stim_intensity, 0.0] # Dim yellow based on decay
-                 else: # Priority 3: Previously active (decaying) or inactive
-                      # Apply faded color based on decayed intensity (Needs refinement for color memory)
-                      # Simple approach: Fade a default "active" color like white/grey
-                      colors[r,c,:] = current_visual_intensity[r,c] * 0.75 # Fade grey?
-                      pass # Let black background show through based on current_visual_intensity decay
+                     colors[r, c, :] = [0.6 * decayed_stim_intensity, 0.6 * decayed_stim_intensity, 0.0] # Dim yellow
+                 else:
+                      # Apply faded color based on decayed intensity (e.g., fade white)
+                      intensity = current_visual_intensity[r, c]
+                      colors[r, c, :] = [intensity * 0.7, intensity * 0.7, intensity * 0.7] # Fade grey/white
 
-        # Update visualization elements
-        img.set_array(np.clip(colors, 0, 1)) # Update image data with new colors
-        title.set_text(f"Time: {current_time:.1f} ms") # Update time display
-        # Update stimulation text indicator
+        img.set_array(np.clip(colors, 0, 1))
+        title.set_text(f"Time: {current_time:.1f} ms")
         stim_text.set_text("STIMULATION" if any_stim_active_flag[original_step_index] else "")
-
-        # Store the current visual intensity grid for the next frame's decay calculation
         prev_activity_grid = current_visual_intensity
-        return [img, title, stim_text] # Return list of updated artists for blitting
+        return [img, title, stim_text]
 
     # --- Create and Save Animation ---
-    # Create the animation object
     anim = animation.FuncAnimation(fig, update_sparse_grid, frames=len(sampled_activity),
-                                 interval=max(20, 1000//fps), # Interval between frames in ms
-                                 blit=True) # Use blitting for performance
+                                 interval=max(20, 1000//fps), blit=True)
     try:
-        # Save the animation using PillowWriter for GIF format
         writer = animation.PillowWriter(fps=fps)
         anim.save(save_path, writer=writer, dpi=150)
         print(f"Successfully saved layout grid animation to {save_path}")
     except Exception as e:
-        print(f"Error saving animation: {e}. PillowWriter might require Pillow installation (`pip install Pillow`)")
+        print(f"Error saving animation: {e}. PillowWriter might require Pillow (`pip install Pillow`)")
     finally:
-        pbar.close() # Ensure progress bar is closed
-        plt.close(fig) # Close the figure to free memory
+        pbar.close()
+        plt.close(fig)
     return anim
+
+# --- END CORRECTED/DYNAMIC Function ---
 

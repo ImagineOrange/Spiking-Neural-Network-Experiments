@@ -16,6 +16,7 @@ from LIF_utils.network_vis_utils import plot_network_connections_sparse, visuali
 from LIF_utils.neuron_vis_utils import plot_reversal_effects
 from LIF_utils.criticality_analysis_utils import plot_enhanced_criticality_analysis,analyze_criticality_comprehensively
 from LIF_utils.correlation_length_utils import visualize_spatial_correlations
+from LIF_utils.criticality_params_grid_search import LIF_utils.criticality_params_grid_search
 
 
 def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,  
