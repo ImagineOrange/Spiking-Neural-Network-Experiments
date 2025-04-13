@@ -10,7 +10,8 @@ import json
 import traceback
 from collections import deque, Counter # Added Counter for confusion matrix
 from tqdm import tqdm
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay # For confusion matrix
+# Added cohen_kappa_score
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, cohen_kappa_score
 
 # --- Style ---
 plt.style.use('dark_background')
@@ -267,8 +268,14 @@ def classify_output_total_sim(activity_record, output_layer_indices, n_classes):
                   tied_labels = [current_label]
              elif count == max_spikes:
                   tied_labels.append(current_label)
+        # Handle ties: If multiple neurons have the max spike count, prediction is ambiguous
         if len(tied_labels) > 1:
-            predicted_label = -1 # Ambiguous prediction
+             # print(f"Ambiguous prediction: Labels {tied_labels} tied with {max_spikes} spikes.") # Optional debug
+             predicted_label = -1 # Ambiguous prediction
+
+    # Handle case where no output neurons spiked at all
+    elif total_output_spikes == 0:
+        predicted_label = -1 # No prediction possible
 
     return predicted_label, output_spike_counts
 # --- End of Directly Implemented Functions ---
@@ -301,34 +308,43 @@ def plot_mnist_input_details(image, label, spike_times_list, stim_duration_ms, s
     plt.close(fig)
 
 # --- Function to Plot Evaluation Results ---
-def plot_evaluation_results(accuracy, confusion_mat, class_labels, save_path):
-    """Creates plots for evaluation: overall accuracy and confusion matrix."""
+# <<< MODIFIED: Added kappa_score argument and plotting >>>
+def plot_evaluation_results(accuracy, kappa_score, confusion_mat, class_labels, save_path):
+    """Creates plots for evaluation: overall accuracy, kappa, and confusion matrix."""
     fig = plt.figure(figsize=(10, 5), facecolor='#1a1a1a')
     gs = gridspec.GridSpec(1, 2, width_ratios=[1, 1.5], wspace=0.3)
 
-    # Plot Accuracy Text
+    # Plot Accuracy and Kappa Text
     ax_acc = fig.add_subplot(gs[0, 0])
-    ax_acc.text(0.5, 0.5, f"Overall Accuracy:\n{accuracy:.2%}",
-                fontsize=18, color='lime', ha='center', va='center',
+    # <<< MODIFIED: Included Kappa score in the text box >>>
+    kappa_text = f"Cohen's Kappa: {kappa_score:.4f}" if kappa_score is not None else "Cohen's Kappa: N/A"
+    acc_text = f"Overall Accuracy: {accuracy:.2%}\n{kappa_text}"
+    ax_acc.text(0.5, 0.5, acc_text,
+                fontsize=16, color='lime', ha='center', va='center',
                 bbox=dict(facecolor='black', alpha=0.5, boxstyle='round,pad=0.5'))
-    ax_acc.set_title("Evaluation Performance", color='white')
+    ax_acc.set_title("Evaluation Metrics", color='white') # Renamed title
     ax_acc.axis('off')
 
     # Plot Confusion Matrix
     ax_cm = fig.add_subplot(gs[0, 1])
-    disp = ConfusionMatrixDisplay(confusion_matrix=confusion_mat, display_labels=class_labels)
-    disp.plot(ax=ax_cm, cmap='viridis', colorbar=True, text_kw={'color': 'black', 'ha': 'center', 'va': 'center'}) # Set text color for visibility on viridis
-    ax_cm.set_title("Confusion Matrix", color='white')
-    ax_cm.tick_params(axis='x', colors='white', rotation=45)
-    ax_cm.tick_params(axis='y', colors='white')
-    ax_cm.xaxis.label.set_color('white')
-    ax_cm.yaxis.label.set_color('white')
-    # Make colorbar ticks white
-    cbar = disp.im_.colorbar
-    if cbar:
-        cbar.ax.yaxis.set_tick_params(color='white')
-        plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white')
-        cbar.set_label(cbar.ax.get_ylabel(), color='white') # Set label color
+    if confusion_mat is not None and class_labels:
+        disp = ConfusionMatrixDisplay(confusion_matrix=confusion_mat, display_labels=class_labels)
+        disp.plot(ax=ax_cm, cmap='viridis', colorbar=True, text_kw={'color': 'black', 'ha': 'center', 'va': 'center'}) # Set text color for visibility on viridis
+        ax_cm.set_title("Confusion Matrix", color='white')
+        ax_cm.tick_params(axis='x', colors='white', rotation=45)
+        ax_cm.tick_params(axis='y', colors='white')
+        ax_cm.xaxis.label.set_color('white')
+        ax_cm.yaxis.label.set_color('white')
+        # Make colorbar ticks white
+        cbar = disp.im_.colorbar
+        if cbar:
+            cbar.ax.yaxis.set_tick_params(color='white')
+            plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white')
+            cbar.set_label(cbar.ax.get_ylabel(), color='white') # Set label color
+    else:
+        ax_cm.text(0.5, 0.5, "Confusion Matrix\nNot Available", color='white', ha='center', va='center')
+        ax_cm.axis('off')
+
 
     plt.suptitle("Trained SNN Evaluation Results", fontsize=16, color='white', y=0.98)
     try:
@@ -349,7 +365,7 @@ if __name__ == "__main__":
     start_overall_time = time.time()
 
     # --- Configuration Loading ---
-    CONFIG_FILE = "ga_mnist_snn_vectorized_fixed_output/best_snn_3class_fixed_structure_config.json" # <<< ADJUST PATH
+    CONFIG_FILE = "ga_mnist_snn_vectorized_precomputed_output/best_snn_2class_fixed_structure_precomputed_config.json" # <<< ADJUST PATH
     SAVED_STATE_DIR = os.path.dirname(CONFIG_FILE) # Directory containing .npy files
 
     if not os.path.exists(CONFIG_FILE): print(f"FATAL ERROR: Config file not found at {CONFIG_FILE}"); exit()
@@ -378,12 +394,12 @@ if __name__ == "__main__":
 
         TOTAL_SIMULATION_DURATION_MS = 150
         STIM_CONFIG = {'strength': 25.0, 'pulse_duration_ms': SIM_DT}
-        ANIMATE_ACTIVITY = True # <<< SET TO False IF YOU DON'T WANT THE GIF
-        EVALUATION_SAMPLES = 5000 # <<< NUMBER OF SAMPLES FOR EVALUATION
+        ANIMATE_ACTIVITY = False # <<< SET TO False TO SPEED UP, True for GIF
+        EVALUATION_SAMPLES = 4000 # <<< REDUCED for faster testing, increase as needed
         VIS_OUTPUT_DIR = "evaluation_and_visualization_output" # New dir name
         if not os.path.exists(VIS_OUTPUT_DIR): os.makedirs(VIS_OUTPUT_DIR)
 
-        BASE_FILENAME = f"best_snn_{N_CLASSES}class_fixed_structure"
+        BASE_FILENAME = f"best_snn_{N_CLASSES}class_fixed_structure_precomputed"
         WEIGHTS_FILE = os.path.join(SAVED_STATE_DIR, f"{BASE_FILENAME}_weights.npy")
         CONNECTIONS_FILE = os.path.join(SAVED_STATE_DIR, f"{BASE_FILENAME}_connection_map.npy")
         DELAYS_FILE = os.path.join(SAVED_STATE_DIR, f"{BASE_FILENAME}_delays_matrix.npy")
@@ -475,8 +491,16 @@ if __name__ == "__main__":
                 )
                 predictions.append(predicted_label)
                 true_labels.append(true_label)
+                # Check for correctness based on valid predictions only
                 if predicted_label != -1 and predicted_label == true_label:
                      correct_predictions += 1
+                # Update tqdm description with running accuracy
+                if len(predictions) > 0:
+                    valid_preds_so_far = [p for p in predictions if p != -1]
+                    correct_so_far = sum(1 for i, p in enumerate(predictions) if p != -1 and p == true_labels[i])
+                    running_acc = correct_so_far / len(valid_preds_so_far) if len(valid_preds_so_far) > 0 else 0.0
+                    eval_loop_iterator.set_postfix_str(f"Acc: {running_acc:.3f}", refresh=True)
+
             except Exception as e:
                 print(f"\nWarning: Error during evaluation for index {idx}: {e}")
                 predictions.append(-1) # Indicate error/no prediction
@@ -485,28 +509,54 @@ if __name__ == "__main__":
         eval_end_time = time.time()
         print(f"\nEvaluation complete in {eval_end_time - eval_start_time:.2f}s.")
 
-        # Calculate Accuracy
+        # Calculate Final Metrics
+        overall_accuracy = 0.0
+        kappa_score = None # Initialize kappa
+        cm = None # Initialize confusion matrix
+        cm_labels = [str(l) for l in TARGET_CLASSES_FROM_CONFIG]
+
         if actual_eval_samples > 0:
-            overall_accuracy = correct_predictions / actual_eval_samples
-            print(f"Overall Accuracy on {actual_eval_samples} samples: {overall_accuracy:.4f}")
+            # Filter out -1 predictions for metric calculations
+            valid_preds_mask = [p != -1 for p in predictions]
+            num_valid_predictions = sum(valid_preds_mask)
+
+            if num_valid_predictions > 0:
+                 true_labels_valid = np.array(true_labels)[valid_preds_mask]
+                 predictions_valid = np.array(predictions)[valid_preds_mask]
+
+                 # Accuracy (based on valid predictions)
+                 correct_valid_predictions = sum(1 for i, p in enumerate(predictions) if p != -1 and p == true_labels[i])
+                 overall_accuracy = correct_valid_predictions / num_valid_predictions
+                 print(f"Overall Accuracy (on {num_valid_predictions} valid predictions): {overall_accuracy:.4f}")
+
+                 # <<< ADDED: Cohen's Kappa Calculation >>>
+                 try:
+                     kappa_score = cohen_kappa_score(true_labels_valid, predictions_valid, labels=TARGET_CLASSES_FROM_CONFIG)
+                     print(f"Cohen's Kappa Score: {kappa_score:.4f}")
+                 except ValueError as e:
+                     print(f"Could not calculate Cohen's Kappa: {e}") # e.g., if only one class predicted
+                     kappa_score = None
+
+                 # Confusion Matrix
+                 cm = confusion_matrix(true_labels_valid, predictions_valid, labels=TARGET_CLASSES_FROM_CONFIG)
+            else:
+                print("No valid predictions were made during evaluation. Accuracy and Kappa cannot be calculated.")
+                overall_accuracy = 0.0
+                kappa_score = None
+                cm = None
         else:
-            overall_accuracy = 0.0
             print("No samples were evaluated.")
 
+
         # --- Plot Evaluation Results ---
+        # <<< MODIFIED: Pass kappa_score to the plotting function >>>
         if actual_eval_samples > 0:
-             # Create label map from config target classes for CM display
-             cm_labels = [str(l) for l in TARGET_CLASSES_FROM_CONFIG]
-             # Filter out -1 predictions if necessary for CM
-             valid_preds_mask = [p != -1 for p in predictions]
-             if sum(valid_preds_mask) > 0:
-                  cm = confusion_matrix(np.array(true_labels)[valid_preds_mask], np.array(predictions)[valid_preds_mask], labels=TARGET_CLASSES_FROM_CONFIG)
-                  plot_evaluation_results(
-                      overall_accuracy, cm, cm_labels,
-                      os.path.join(VIS_OUTPUT_DIR, "evaluation_summary.png")
-                  )
-             else: print("No valid predictions made, skipping confusion matrix plot.")
-        else: print("Skipping evaluation plotting as no samples were evaluated.")
+            plot_evaluation_results(
+                overall_accuracy, kappa_score, cm, cm_labels, # Pass kappa
+                os.path.join(VIS_OUTPUT_DIR, "evaluation_summary.png")
+            )
+        else:
+            print("Skipping evaluation plotting as no samples were evaluated.")
 
     except Exception as e: print(f"FATAL ERROR during evaluation: {e}"); traceback.print_exc(); exit()
 
@@ -532,22 +582,53 @@ if __name__ == "__main__":
             vis_activity_record = run_vectorized_simulation(
                 network_obj, duration=TOTAL_SIMULATION_DURATION_MS, dt=SIM_DT,
                 mnist_input_spikes=vis_spike_times, stim_interval_strength=STIM_CONFIG['strength'],
-                stim_pulse_duration_ms=STIM_CONFIG['pulse_duration_ms'], show_progress=False
+                stim_pulse_duration_ms=STIM_CONFIG['pulse_duration_ms'], show_progress=True # Show progress for single long sim
             )
 
+            # Re-classify just this example for confirmation
+            vis_predicted_label, vis_spike_counts = classify_output_total_sim(
+                vis_activity_record, layer_indices[-1] if layer_indices else None, N_CLASSES
+            )
+            print(f"Single example classification: Predicted={vis_predicted_label}, True={TARGET_VIS_CLASS}")
+            print(f"Single example output spike counts: {vis_spike_counts}")
+
+
             # Generate visualization plots using vis_activity_record
-            vis_output_prefix = os.path.join(VIS_OUTPUT_DIR, f"vis_digit_{TARGET_VIS_CLASS}_example")
+            vis_output_prefix = os.path.join(VIS_OUTPUT_DIR, f"vis_digit_{TARGET_VIS_CLASS}_pred_{vis_predicted_label}_example")
             pos_for_vis = pos_loaded
             if not isinstance(pos_for_vis, dict): pos_for_vis = None
 
+            print("Generating structure plot...")
             Layered_plot_network_connections_sparse(network=network_obj, pos=pos_for_vis, edge_percent=100, save_path=f"{vis_output_prefix}_structure.png")
-            if pos_for_vis and 0 in network_obj.graph.nodes:
-                 w_fig, d_fig = Layered_visualize_distance_dependences(network=network_obj, pos=pos_for_vis, neuron_idx=0, base_transmission_delay=BASE_DELAY, save_path_base=f"{vis_output_prefix}_neuron0_dist")
-                 if w_fig: plt.close(w_fig);
-                 if d_fig: plt.close(d_fig)
-            if layer_indices: Layered_plot_activity_and_layer_psth(network=network_obj, activity_record=vis_activity_record, layer_indices=layer_indices, dt=SIM_DT, save_path=f"{vis_output_prefix}_activity_psth.png")
-            if layer_indices: Layered_plot_layer_wise_raster(network=network_obj, activity_record=vis_activity_record, layer_indices=layer_indices, dt=SIM_DT, save_path=f"{vis_output_prefix}_raster.png")
-            if ANIMATE_ACTIVITY and pos_for_vis: Layered_visualize_activity_layout_grid(network=network_obj, pos=pos_for_vis, activity_record=vis_activity_record, dt=SIM_DT, save_path=f"{vis_output_prefix}_animation.gif", fps=25)
+
+            if pos_for_vis and network_obj.graph.number_of_nodes() > 0:
+                print("Generating distance dependence plots...")
+                try:
+                     # Pick a neuron from the first layer for distance plots if possible
+                     neuron_for_dist_plot = 0
+                     if layer_indices and len(layer_indices) > 0:
+                          first_layer_start, first_layer_end = layer_indices[0]
+                          if first_layer_start < network_obj.n_neurons:
+                               neuron_for_dist_plot = first_layer_start # Use the first neuron of the first layer
+
+                     w_fig, d_fig = Layered_visualize_distance_dependences(network=network_obj, pos=pos_for_vis, neuron_idx=neuron_for_dist_plot, base_transmission_delay=BASE_DELAY, save_path_base=f"{vis_output_prefix}_neuron{neuron_for_dist_plot}_dist")
+                     if w_fig: plt.close(w_fig)
+                     if d_fig: plt.close(d_fig)
+                except Exception as dist_e:
+                    print(f"Warning: Could not generate distance dependence plots: {dist_e}")
+
+
+            if layer_indices:
+                 print("Generating activity PSTH plot...")
+                 Layered_plot_activity_and_layer_psth(network=network_obj, activity_record=vis_activity_record, layer_indices=layer_indices, dt=SIM_DT, save_path=f"{vis_output_prefix}_activity_psth.png")
+                 print("Generating layer-wise raster plot...")
+                 Layered_plot_layer_wise_raster(network=network_obj, activity_record=vis_activity_record, layer_indices=layer_indices, dt=SIM_DT, save_path=f"{vis_output_prefix}_raster.png")
+
+            if ANIMATE_ACTIVITY and pos_for_vis:
+                print("Generating activity animation GIF (this may take a while)...")
+                Layered_visualize_activity_layout_grid(network=network_obj, pos=pos_for_vis, activity_record=vis_activity_record, dt=SIM_DT, save_path=f"{vis_output_prefix}_animation.gif", fps=25)
+            elif ANIMATE_ACTIVITY and not pos_for_vis:
+                print("Skipping animation: Positions (pos) data not loaded correctly.")
 
             print("Single example visualization generated.")
 

@@ -85,18 +85,6 @@ class LayeredNeuronalNetworkVectorized:
         self.current_avalanche_size = 0
         self.current_avalanche_start = None
 
-        # Pre-calculate decay factors (assuming dt is constant during a run)
-        # Note: Need dt passed to init or a separate prep method if dt can change
-        # self._precalculate_decay(dt) # Call this if dt is known at init
-
-    # def _precalculate_decay(self, dt):
-    #     """Pre-calculate exponential decay factors."""
-    #     # Handle potential division by zero if tau is 0
-    #     self._exp_decay_m = np.exp(-dt / np.where(self.tau_m > 1e-9, self.tau_m, 1e-9))
-    #     self._exp_decay_e = np.exp(-dt / np.where(self.tau_e > 1e-9, self.tau_e, 1e-9))
-    #     self._exp_decay_i = np.exp(-dt / np.where(self.tau_i > 1e-9, self.tau_i, 1e-9))
-    #     self._exp_decay_adapt = np.exp(-dt / np.where(self.tau_adaptation > 1e-9, self.tau_adaptation, 1e-9))
-
 
     def add_connection(self, u, v, weight, delay=1.0):
          """

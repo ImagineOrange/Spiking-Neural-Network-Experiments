@@ -18,6 +18,12 @@ from LIF_objects.Layered_LIFNeuronWithReversal import Layered_LIFNeuronWithRever
 from MNIST_utils.MNIST_stimulation_encodings import MNIST_loader,SNNStimulator, downsample_image
 
 
+import numpy as np
+import random
+import networkx as nx
+# Assuming LayeredNeuronalNetworkVectorized class is defined elsewhere
+# from your_module import LayeredNeuronalNetworkVectorized
+
 # --- Structure Creation Function (Only called ONCE now) ---
 def create_snn_structure(n_layers_list, inhibitory_fraction, connection_probs,
                         neuron_params_dict, # Renamed for clarity
@@ -28,19 +34,25 @@ def create_snn_structure(n_layers_list, inhibitory_fraction, connection_probs,
     LayeredNeuronalNetworkVectorized instance with appropriate parameter arrays.
     Weights are initially 0. Returns network, layer indices, positions, and connection_map.
     MODIFIED: This function is now intended to be called only ONCE.
+              Includes hardcoded mutual inhibition between the first and last
+              neurons of the output layer (if >= 2 neurons).
     """
     if random_seed is not None:
         np.random.seed(random_seed)
         random.seed(random_seed)
 
     num_layers = len(n_layers_list)
-    total_neurons = sum(n_layers_list)
+    original_total_neurons = sum(n_layers_list) # Store original if needed
 
     # Ensure last layer size matches required classes
+    original_last_layer_size = n_layers_list[-1]
     if n_layers_list[-1] != n_classes:
-         print(f"Structure Creation Warning: Adjusting last layer from {n_layers_list[-1]} to {n_classes}.")
+         print(f"Structure Creation Info: Adjusting last layer size from {original_last_layer_size} to {n_classes}.")
          n_layers_list[-1] = n_classes
-         total_neurons = sum(n_layers_list) # Recalculate
+
+    # Recalculate total neurons and store final output layer size
+    total_neurons = sum(n_layers_list)
+    output_layer_size = n_layers_list[-1]
 
     # --- Determine inhibitory status for all neurons (FIXED) ---
     is_inhibitory_array = np.random.rand(total_neurons) < inhibitory_fraction
@@ -60,6 +72,7 @@ def create_snn_structure(n_layers_list, inhibitory_fraction, connection_probs,
         'feedback_1': 0.06, 'feedback_2': 0.0,
         'long_feedforward': 0.01, 'long_feedback': 0.005
     }
+    # Use provided connection_probs, falling back to defaults
     conn_probs_actual = {k: connection_probs.get(k, conn_prob_defaults[k]) for k in conn_prob_defaults}
 
     # Create Positions and Assign Layers to Graph Nodes
@@ -86,39 +99,54 @@ def create_snn_structure(n_layers_list, inhibitory_fraction, connection_probs,
              network.neuron_grid_positions[current_node_index] = node_pos # Store pos
         start_idx = end_idx
 
+    # --- Necessary values defined before probabilistic loop ---
+    # Get output layer indices (needed AFTER the loop for hardcoding)
+    output_layer_start_idx, output_layer_end_idx = layer_indices[-1]
+
     # Calculate Max Distance for Delay Scaling
     max_possible_dist = 1.0
     if pos:
-        all_x = [p[0] for p in pos.values()]
-        all_y = [p[1] for p in pos.values()]
-        if all_x and all_y:
-             dist_sq = (max(all_x) - min(all_x))**2 + (max(all_y) - min(all_y))**2
-             if dist_sq > 1e-9: max_possible_dist = np.sqrt(dist_sq)
+        all_pos_vals = list(pos.values()) # Avoid calling .values() multiple times
+        if len(all_pos_vals) > 1:
+            all_x = [p[0] for p in all_pos_vals]
+            all_y = [p[1] for p in all_pos_vals]
+            # Check if points are not all identical before calculating max dist
+            if not (max(all_x) == min(all_x) and max(all_y) == min(all_y)):
+                dist_sq = (max(all_x) - min(all_x))**2 + (max(all_y) - min(all_y))**2
+                if dist_sq > 1e-9: max_possible_dist = np.sqrt(dist_sq)
 
     min_delay = max(0.1, dt) # Minimum delay
 
-    # Add Connections based on Probability and Build Connection Map (FIXED TOPOLOGY)
+    # --- Add Connections based on Probability (Your Original Logic) ---
     connection_count = 0
     connection_map = [] # Stores [(u, v), ...] for existing connections
     for i in range(total_neurons):
+        # Skip if node doesn't exist in graph (shouldn't happen with current logic)
         if i not in network.graph.nodes or i not in pos: continue
-        # Use fixed inhibitory status and layer info
+
+        # Get source neuron properties
         is_source_inhibitory = network.is_inhibitory[i]
+        # Retrieve layer info stored in the graph node
         layer_i = network.graph.nodes[i].get('layer', -1)
-        pos_i = pos[i]
+        pos_i = pos[i] # Get position
 
         for j in range(total_neurons):
+            # Skip self-connections and non-existent targets
             if i == j or j not in network.graph.nodes or j not in pos: continue
+
+            # Get target neuron properties
             layer_j = network.graph.nodes[j].get('layer', -1)
-            pos_j = pos[j]
+            pos_j = pos[j] # Get position
             prob = 0.0; connect = False
 
-            # Determine connection probability (same logic as before)
+            # Determine connection probability based on original logic
             if layer_i != -1 and layer_j != -1:
                  layer_diff = layer_j - layer_i
                  if is_source_inhibitory:
                      if layer_diff == 0: prob = conn_probs_actual['inh_recurrent']
-                     elif abs(layer_diff) == 1: prob = conn_probs_actual['feedforward_1'] * 0.2 # Example Inhibitory FF
+                     # Example inhibitory feedforward (adjust multiplier if needed)
+                     elif abs(layer_diff) == 1: prob = conn_probs_actual['feedforward_1'] * 0.2
+                     # Add rules for other inhibitory connections if desired (e.g., feedback, long-range)
                  else: # Excitatory connections
                      if layer_diff == 0: prob = conn_probs_actual['exc_recurrent']
                      elif layer_diff == 1: prob = conn_probs_actual['feedforward_1']
@@ -127,20 +155,73 @@ def create_snn_structure(n_layers_list, inhibitory_fraction, connection_probs,
                      elif layer_diff == -2: prob = conn_probs_actual['feedback_2']
                      elif layer_diff > 2: prob = conn_probs_actual['long_feedforward']
                      elif layer_diff < -2: prob = conn_probs_actual['long_feedback']
-                 # Connect based on probability (THIS DETERMINES THE FIXED TOPOLOGY)
+
+                 # Connect based on probability
                  if random.random() < prob: connect = True
 
+            # If connection decided, calculate delay and add to network
             if connect:
                 distance = np.sqrt((pos_i[0] - pos_j[0])**2 + (pos_i[1] - pos_j[1])**2)
+                # Calculate delay based on distance relative to max possible distance
                 delay = base_transmission_delay * (0.5 + 0.5 * (distance / max_possible_dist)) if max_possible_dist > 1e-9 else base_transmission_delay * 0.5
-                delay = max(min_delay, delay) # Enforce minimum delay
-                # Add connection with weight 0 AND THE FIXED DELAY
-                # This populates the network.weights and network.delays matrices
+                # Ensure delay is at least min_delay and round to nearest dt multiple if desired
+                delay = max(min_delay, np.round(delay / dt) * dt if dt > 0 else delay)
+
+                # Add connection with weight 0.0 (to be set later) and calculated delay
                 network.add_connection(i, j, weight=0.0, delay=delay)
                 connection_map.append((i, j)) # Record that this connection exists
                 connection_count += 1
 
-    print(f"Fixed SNN Structure Created: {total_neurons} neurons, {connection_count} potential connections.")
+    # --- <<< ADD HARDCODED MUTUAL INHIBITION BETWEEN FIRST & LAST OUTPUT NEURONS >>> ---
+    manual_connections_added = 0
+    hardcoded_inhib_weight = -2.5 # Static inhibitory weight (negative)
+    hardcoded_delay = min_delay    # Static delay (use minimum physiological delay)
+
+    if output_layer_size >= 2:
+        # Indices were defined after the layer creation loop
+        idx1 = output_layer_start_idx
+        idx2 = output_layer_end_idx - 1 # Index of the last neuron in the layer
+
+        # Check if neurons actually exist in pos dict (safety check)
+        if idx1 in pos and idx2 in pos:
+            print(f"Structure Creation Info: Adding hardcoded mutual inhibition between output neurons {idx1} and {idx2}.")
+
+            # Add connection idx1 -> idx2 (using negative weight directly)
+            network.add_connection(idx1, idx2, weight=hardcoded_inhib_weight, delay=hardcoded_delay)
+            if (idx1, idx2) not in connection_map: # Add to map if not already present
+                connection_map.append((idx1, idx2))
+                manual_connections_added += 1
+            else: # If connection existed (e.g., probabilistic inh_recurrent), update properties
+                 network.graph[idx1][idx2]['weight'] = hardcoded_inhib_weight
+                 network.graph[idx1][idx2]['delay'] = hardcoded_delay
+                 print(f"  - Note: Connection ({idx1}->{idx2}) existed, properties updated.")
+
+            # Add connection idx2 -> idx1 (using negative weight directly)
+            network.add_connection(idx2, idx1, weight=hardcoded_inhib_weight, delay=hardcoded_delay)
+            if (idx2, idx1) not in connection_map: # Add to map if not already present
+                connection_map.append((idx2, idx1))
+                manual_connections_added += 1
+            else: # If connection existed, update properties
+                 network.graph[idx2][idx1]['weight'] = hardcoded_inhib_weight
+                 network.graph[idx2][idx1]['delay'] = hardcoded_delay
+                 print(f"  - Note: Connection ({idx2}->{idx1}) existed, properties updated.")
+        else:
+             # This case should ideally not be reached if indices are correct
+             print(f"Warning: Could not find positions for hardcoded neurons {idx1} or {idx2}.")
+
+    elif output_layer_size == 1:
+        print("Structure Creation Info: Output layer has only 1 neuron, skipping hardcoded mutual inhibition.")
+    # No need for else block if output_layer_size cannot be 0
+
+    # --- <<< END HARDCODED MUTUAL INHIBITION >>> ---
+
+    # Final status print, including manual connections if added
+    print(f"Fixed SNN Structure Created: {total_neurons} neurons.")
+    print(f"  - Probabilistic connections added: {connection_count}")
+    if manual_connections_added > 0:
+        print(f"  - Hardcoded mutual inhibition connections added: {manual_connections_added}")
+
+    # Return the network object and supporting information
     return network, layer_indices, pos, connection_map
 
 
@@ -673,28 +754,27 @@ if __name__ == "__main__":
     start_overall_time = time.time()
 
     # --- Configuration (Mostly Unchanged) ---
-    TARGET_CLASSES = [0, 1, 2, 3] # Example: Classify digits 0, 1, 2
+    TARGET_CLASSES = [0, 1] # Example: Classify digits 0, 1, 2
     N_CLASSES = len(TARGET_CLASSES)
     label_map_global = {original_label: new_index for new_index, original_label in enumerate(TARGET_CLASSES)}
     print(f"--- Running {N_CLASSES}-Class MNIST GA SNN (Vectorized - Fixed Structure, Precomputed Spikes) ---") # Updated print
     print(f"Target Digits: {TARGET_CLASSES} -> Mapped Indices: {list(range(N_CLASSES))}")
 
     POPULATION_SIZE = 100
-    NUM_GENERATIONS = 5
+    NUM_GENERATIONS = 6
     MUTATION_RATE = 0.01
-    MUTATION_STRENGTH = 0.001
+    MUTATION_STRENGTH = 0.005
     CROSSOVER_RATE = 0.7
     ELITISM_COUNT = 2
     TOURNAMENT_SIZE = 5
-    FITNESS_EVAL_EXAMPLES = 100 # Number of examples per fitness evaluation
-    TEST_SET_EXAMPLES = 1000 # Number of examples for final test
+    FITNESS_EVAL_EXAMPLES = 2000 # Number of examples per fitness evaluation
     N_CORES = max(1, os.cpu_count() - 1 if os.cpu_count() else 1) # Use almost all cores
     print(f"Using {N_CORES} cores for parallel evaluation.")
 
     mnist_stim_duration_global = 50  # ms
     max_freq_hz_global = 200.0       # Hz
     downsample_factor_global = 4     # 28x28 -> 7x7 = 49 inputs
-    sim_duration_global = 100        # ms
+    sim_duration_global = 90        # ms
     sim_dt_global = 0.1              # ms
 
     input_neurons = (28 // downsample_factor_global) ** 2
@@ -711,13 +791,13 @@ if __name__ == "__main__":
         'v_rest': -65.0, 'v_threshold': -55.0, 'v_reset': -75.0,
         'tau_m': 10.0, 'tau_ref': 1.5, 'tau_e': 3.0, 'tau_i': 7.0,
         'e_reversal': 0.0, 'i_reversal': -70.0,
-        'v_noise_amp': 0.0, 'i_noise_amp': 0.005,
+        'v_noise_amp': 0.0, 'i_noise_amp': 0.0005,
         'adaptation_increment': 0.3, 'tau_adaptation': 120,
         # 'is_inhibitory' will be generated in create_snn_structure
     }
 
     weight_min_ga_global = 0.002 # Allow inhibitory weights directly
-    weight_max_ga_global = 0.4
+    weight_max_ga_global = 0.35
 
     stim_config_global = {'strength': 25, 'pulse_duration_ms': sim_dt_global}
     master_seed = 42
@@ -746,8 +826,7 @@ if __name__ == "__main__":
         print(f"Using {len(train_eval_indices_pool)} examples for GA eval sampling, {len(test_indices_pool)} for final testing.")
         if len(train_eval_indices_pool) < FITNESS_EVAL_EXAMPLES:
              print(f"Warning: Pool for GA eval ({len(train_eval_indices_pool)}) is smaller than requested eval size ({FITNESS_EVAL_EXAMPLES}). Using pool size.")
-        if len(test_indices_pool) < TEST_SET_EXAMPLES:
-             print(f"Warning: Pool for final test ({len(test_indices_pool)}) is smaller than requested test size ({TEST_SET_EXAMPLES}). Using pool size.")
+    
 
     except Exception as e: print(f"Error loading/filtering MNIST: {e}. Exiting."); exit()
 
@@ -1011,8 +1090,12 @@ if __name__ == "__main__":
 
 
 
+'''
+TOODOO
 
-
-#precalculate delays
-#precalculate input spieks in mnist
+#kappa score calculation and vis
+#precalculate delays                       XXX
+#precalculate input spieks in mnist        XXX
 #change connections to json 
+
+'''
