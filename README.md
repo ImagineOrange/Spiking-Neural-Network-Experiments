@@ -1,5 +1,7 @@
 # Neuronal Modeling and Circuit Dynamics
 
+![vis_digit_0_example_structure copy](https://github.com/user-attachments/assets/13f5652c-879f-44b9-b498-9c60fdffd87c)
+
 The aim of this repo is to develop my understanding on neuronal modeling and circuit dynamics. These neuron models are very different from the types found in artificial neural networks (ANNs) used in deep learning. They are called **Leaky-Integrate and Fire (LIF)** models. They compute over time, and are capable of integrating signals from many synaptic connections. LIF neurons model their own membrane potentials, and fire action potentials.
 
 Importantly, these specific LIF neurons are **conductance-based models**.
@@ -28,5 +30,5 @@ The networks in this repo are sparsely connected, and have modifiable topologies
 
 ![Activity raster plot showing spikes over time for different neurons](https://github.com/user-attachments/assets/b932a870-d15c-4e6d-a424-508d8dde3f9e)
 
-![vis_digit_0_example_structure copy](https://github.com/user-attachments/assets/13f5652c-879f-44b9-b498-9c60fdffd87c)
+
 
