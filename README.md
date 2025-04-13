@@ -5,7 +5,7 @@
 The aim of this repo is to develop my understanding on neuronal modeling and circuit dynamics. These neuron models are very different from the types found in artificial neural networks (ANNs) used in deep learning. They are called **Leaky-Integrate and Fire (LIF)** models. They compute over time, and are capable of integrating signals from many synaptic connections. LIF neurons model their own membrane potentials, and fire action potentials.
 
 Importantly, these specific LIF neurons are **conductance-based models**.
-When a presynaptic neuron fires, it doesn't directly inject current. Instead, it causes a temporary increase in the conductance of specific types of ion channels on the postsynaptic neuron's membrane.
+When a presynaptic neuron fires, it doesn't directly inject current. Instead, it causes a temporary increase in the conductance of specific class of ion channels (abstracted) on the postsynaptic neuron's membrane.
 
 Excitatory inputs increase excitatory conductance (`g_e`).
 Inhibitory inputs increase inhibitory conductance (`g_i`). These conductances increase rapidly upon spike arrival and then decay exponentially over time (governed by `tau_e` and `tau_i`, respectively). Reversal potentials are also implemented for both excitatory and inhibitory inputs.
