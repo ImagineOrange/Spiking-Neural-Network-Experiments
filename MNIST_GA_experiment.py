@@ -172,6 +172,47 @@ def create_snn_structure(n_layers_list, inhibitory_fraction, connection_probs,
                 connection_map.append((i, j)) # Record that this connection exists
                 connection_count += 1
 
+    # --- <<< MODIFIED: ADD HARDCODED MUTUAL INHIBITION BETWEEN ALL OUTPUT NEURONS >>> ---
+    manual_connections_added = 0
+    hardcoded_inhib_weight = -2.5 # Static inhibitory weight (negative)
+    hardcoded_delay = min_delay    # Static delay (use minimum physiological delay)
+
+    if output_layer_size >= 2:
+        # --- MODIFICATION START ---
+        print(f"Structure Creation Info: Adding/updating hardcoded mutual inhibition between ALL distinct pairs of output neurons ({output_layer_start_idx} to {output_layer_end_idx-1}).")
+
+        # Iterate through all distinct pairs of neurons in the output layer
+        for i in range(output_layer_start_idx, output_layer_end_idx):
+            # Safety check if source neuron i exists in pos (and thus graph)
+            if i not in pos:
+                print(f"Warning: Output neuron {i} not found in positions, skipping its outgoing inhibitory connections.")
+                continue
+
+            for j in range(output_layer_start_idx, output_layer_end_idx):
+                # Skip self-connections
+                if i == j:
+                    continue
+
+                # Safety check if target neuron j exists in pos (and thus graph)
+                if j not in pos:
+                    print(f"Warning: Output neuron {j} not found in positions, skipping inhibitory connection from {i} to {j}.")
+                    continue
+
+                # Add/Update inhibitory connection i -> j
+                connection_exists = (i, j) in connection_map # Check if it was added probabilistically
+                network.add_connection(i, j, weight=hardcoded_inhib_weight, delay=hardcoded_delay)
+                manual_connections_added += 1 # Count each directed connection added/updated
+
+                if not connection_exists:
+                    # If it wasn't added probabilistically, add it to the map
+                    connection_map.append((i, j))
+                    # print(f"  - Added new connection: ({i}->{j})") # Optional debug print
+                # else:
+                    # If it existed (e.g., from inh_recurrent), add_connection already updated its weight/delay
+                    # print(f"  - Updated existing connection: ({i}->{j})") # Optional debug print
+
+        # --- MODIFICATION END ---
+    '''
     # --- <<< ADD HARDCODED MUTUAL INHIBITION BETWEEN FIRST & LAST OUTPUT NEURONS >>> ---
     manual_connections_added = 0
     hardcoded_inhib_weight = -2.5 # Static inhibitory weight (negative)
@@ -214,6 +255,7 @@ def create_snn_structure(n_layers_list, inhibitory_fraction, connection_probs,
     # No need for else block if output_layer_size cannot be 0
 
     # --- <<< END HARDCODED MUTUAL INHIBITION >>> ---
+    '''
 
     # Final status print, including manual connections if added
     print(f"Fixed SNN Structure Created: {total_neurons} neurons.")
@@ -555,14 +597,13 @@ def evaluate_chromosome_fitness(chromosome_weights,       # The weights to evalu
                                 # Data Params
                                 p_filtered_images, p_filtered_labels, p_label_map,
                                 p_eval_indices, # Specific indices for this evaluation run
-                                p_precomputed_spikes, # *** ADDED: Parameter to accept the argument ***
+                                p_precomputed_spikes, # <<< This dictionary holds the precomputed spikes
                                 # Simulation Params
                                 p_sim_duration, p_dt, p_stim_config,
-                                p_downsample_factor, p_mnist_stim_duration, p_max_freq_hz):
+                                p_downsample_factor, p_mnist_stim_duration, p_max_freq_hz): # These last 3 params are no longer needed here
     """
     Fitness function designed for parallel execution.
-    MODIFIED: Creates a minimal network instance, populates its graph, and applies weights.
-              (Accepts precomputed spikes argument, but internal logic may still generate them).
+    MODIFIED: Uses precomputed spikes passed via p_precomputed_spikes.
     """
     # --- 1. Create a MINIMAL network instance for evaluation ---
     try:
@@ -578,143 +619,96 @@ def evaluate_chromosome_fitness(chromosome_weights,       # The weights to evalu
         eval_network.reset_all() # Reset state arrays (v, g_e, g_i, etc.)
 
         # --- 2. Set weights (using the fixed connection map) ---
-        # This sets the weight matrix but NOT the graph edges yet
         eval_network.set_weights_sparse(chromosome_weights, p_connection_map)
 
-        # --- 3. *** POPULATE GRAPH FOR EVAL_NETWORK *** ---
-        # print("Populating graph for eval_network...") # Optional debug print
-        # Add nodes first (optional but good practice)
+        # --- 3. POPULATE GRAPH FOR EVAL_NETWORK ---
+        # (Graph population code remains unchanged)
         for i in range(p_total_neurons):
             eval_network.graph.add_node(i, is_inhibitory=p_fixed_inhib_array[i])
-
-        # Add edges based on the connection map
         for u, v in p_connection_map:
             if u < p_total_neurons and v < p_total_neurons:
-                weight = eval_network.weights[u, v] # Get the weight just set
-                delay = eval_network.delays[u, v]   # Get the delay already set
+                weight = eval_network.weights[u, v]
+                delay = eval_network.delays[u, v]
                 eval_network.graph.add_edge(u, v, weight=weight, delay=delay)
-            # else: print(f"Warning: Invalid indices ({u}, {v}) in p_connection_map skipped.") # Optional debug
-        # print("Graph populated for eval_network.") # Optional debug print
-        # --- *** END OF GRAPH POPULATION *** ---
 
-    except ValueError as e: # Catch specific error from set_weights_sparse if needed
-        # print(f"Worker Error: setting sparse weights: {e}") # Suppress print
+    except ValueError as e:
         return -np.inf
-    except Exception as e: # Catch other errors during network creation/population
-        # print(f"Worker Error: creating/populating eval SNN instance: {e}") # Suppress print
-        return -np.inf # Use -inf to signal failure clearly
-
-
-    # --- 4. Create SNN Stimulator locally ---
-    # NOTE: This part still generates spikes on the fly, ignoring p_precomputed_spikes
-    # To use precomputed spikes, this block and the call inside the loop should be removed,
-    # and mnist_spike_times should be retrieved from p_precomputed_spikes.
-    try:
-        mnist_stimulator = SNNStimulator(
-            total_time_ms=p_mnist_stim_duration,
-            max_freq_hz=p_max_freq_hz
-        )
     except Exception as e:
-         # print(f"Worker Error: creating SNNStimulator: {e}") # Suppress print
-         return -np.inf
+        return -np.inf
+
+
+    # --- 4. Create SNN Stimulator locally --- <<< REMOVED >>>
+    # This section is no longer needed as spikes are precomputed.
 
     # --- 5. Run simulation on the specified subset of filtered data ---
     accuracies = []
-    # print_limit = 5 # Limit debug prints to first few examples per worker
-    # print_count = 0
 
     # Check if evaluation indices are valid for the filtered data
     if not hasattr(p_eval_indices, '__len__') or len(p_eval_indices) == 0:
-         # print("Worker Warning: No evaluation indices provided.") # Suppress print
          return 0.0
     if len(p_filtered_labels) == 0:
-         # print("Worker Warning: Filtered labels list is empty.") # Suppress print
          return 0.0
 
     valid_eval_indices = [idx for idx in p_eval_indices if 0 <= idx < len(p_filtered_labels)]
     if not valid_eval_indices:
-         # print("Worker Warning: No valid evaluation indices found.") # Suppress print
          return 0.0
 
     for idx in valid_eval_indices: # Iterate only through valid indices
         try:
-            # print_count += 1
-            # do_print = print_count <= print_limit # Control printing
-
-            mnist_original_image = p_filtered_images[idx].reshape(28,28)
+            # Get true label (no change)
             true_original_label = p_filtered_labels[idx]
-
-            # Check label map validity
             if true_original_label not in p_label_map:
-                 # print(f"Worker Warning: Label {true_original_label} not in label_map. Skipping index {idx}.") # Optional verbose
                  continue
             true_mapped_label = p_label_map[true_original_label]
 
-            # if do_print:
-            #     print(f"\n--- [Worker] Evaluating Example Index (filtered): {idx} ---")
-            #     print(f"True Original Label: {true_original_label} -> Mapped Target Label: {true_mapped_label}")
+            # --- Get PRECOMPUTED spikes (REPLACE generation) --- <<< CHANGED >>>
+            # Remove image loading/processing/downsampling here
+            # Remove local stimulator instantiation and call to generate_spikes
 
-            if p_downsample_factor > 1:
-                mnist_image = downsample_image(mnist_original_image, p_downsample_factor)
-            else: mnist_image = mnist_original_image
+            # *** Retrieve spikes from the dictionary ***
+            mnist_spike_times = p_precomputed_spikes.get(idx, None)
+            if mnist_spike_times is None:
+                # If precomputation failed for this index, skip it
+                continue
+            # *** End Retrieval ***
 
-            # *** NOTE: Still generating spikes here, not using p_precomputed_spikes ***
-            mnist_spike_times = mnist_stimulator.generate_spikes(mnist_image)
-
-            # Run simulation using the network with fixed structure & current weights
+            # Run simulation using the retrieved precomputed spikes
             activity_record = run_snn_simulation(
-                eval_network, # Use the eval_network with populated graph
+                eval_network,
                 duration=p_sim_duration,
                 dt=p_dt,
-                mnist_input_spikes=mnist_spike_times,
+                mnist_input_spikes=mnist_spike_times, # Use the retrieved spikes
                 stimulation_params=p_stim_config
             )
 
-            # Get prediction AND counts (ensure calculate_prediction returns both)
+            # Get prediction (no change)
             predicted_label, output_counts = calculate_prediction(
                 activity_record, p_layer_indices, dt=p_dt,
-                stim_duration_ms=p_mnist_stim_duration, n_classes=p_n_classes
+                stim_duration_ms=p_mnist_stim_duration, # Still needed for prediction logic? Check calculate_prediction
+                n_classes=p_n_classes
             )
 
-            # if do_print:
-            #     print(f"Output Layer Spike Counts: {output_counts}")
-            #     print(f"Predicted Label: {predicted_label}")
-
-            # Check if prediction is valid (not -1) before calculating accuracy
+            # Calculate accuracy (no change)
             if predicted_label != -1:
                  is_correct = (predicted_label == true_mapped_label)
                  accuracies.append(1 if is_correct else 0)
-                 # if do_print: print(f"Comparison: Correct? {is_correct}")
-            # If prediction is -1 (e.g., no output spikes or tie if handled that way),
-            # accuracy is implicitly 0 as nothing is appended as 1.
-            # elif do_print:
-                 # print("Comparison: No prediction made or tie occurred (predicted_label == -1)")
 
-            # if do_print: print(f"--- [Worker] End Example {idx} ---\n")
-
+        # Error handling (no change)
         except KeyError as e:
-             # print(f"Worker Warning: KeyError for index {idx} (likely label map): {e}. Skipping.") # Optional verbose
              continue
         except IndexError as e:
-             # print(f"Worker Warning: IndexError for index {idx} (likely image/label access): {e}. Skipping.") # Suppress print
              continue
         except Exception as e:
-             # print(f"Worker Error: Unhandled exception during sim for index {idx}: {e}. Skipping.") # Suppress print
-             # Consider logging traceback here for debugging difficult errors
-             # import traceback
-             # traceback.print_exc()
              continue
 
-    # --- 6. Return average accuracy as fitness ---
-    # print(f"\n--- [Worker] Final Accuracies List for Chromosome: {accuracies} ---") # Print the whole list
+    # --- 6. Return average accuracy as fitness --- (no change)
     fitness = np.mean(accuracies) if accuracies else 0.0
-    # Ensure fitness is not NaN
     if np.isnan(fitness):
-        # print("Worker Warning: Calculated fitness is NaN. Returning 0.0.") # Suppress print
         fitness = 0.0
-
-    # print(f"--- [Worker] Calculated Fitness: {fitness:.4f} ---") # Suppress print
     return fitness
+
+
+
 
 # --- Plotting Function for GA Progress (Unchanged) ---
 def plot_ga_progress(generations, best_fitness_history, avg_fitness_history, final_test_accuracy, filename, fitness_eval_examples):
@@ -747,6 +741,19 @@ def plot_ga_progress(generations, best_fitness_history, avg_fitness_history, fin
     plt.close(fig_ga)
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
 # --- Main Execution Block (MODIFIED FOR PRECOMPUTATION) ---
 if __name__ == "__main__":
     multiprocessing.freeze_support() # For compatibility
@@ -754,14 +761,14 @@ if __name__ == "__main__":
     start_overall_time = time.time()
 
     # --- Configuration (Mostly Unchanged) ---
-    TARGET_CLASSES = [0, 1] # Example: Classify digits 0, 1, 2
+    TARGET_CLASSES = [0,1,2,3,4] # Example: Classify digits 0, 1, 2
     N_CLASSES = len(TARGET_CLASSES)
     label_map_global = {original_label: new_index for new_index, original_label in enumerate(TARGET_CLASSES)}
     print(f"--- Running {N_CLASSES}-Class MNIST GA SNN (Vectorized - Fixed Structure, Precomputed Spikes) ---") # Updated print
     print(f"Target Digits: {TARGET_CLASSES} -> Mapped Indices: {list(range(N_CLASSES))}")
 
     POPULATION_SIZE = 100
-    NUM_GENERATIONS = 6
+    NUM_GENERATIONS = 30
     MUTATION_RATE = 0.01
     MUTATION_STRENGTH = 0.005
     CROSSOVER_RATE = 0.7
@@ -1092,7 +1099,6 @@ if __name__ == "__main__":
 
 '''
 TOODOO
-
 #kappa score calculation and vis
 #precalculate delays                       XXX
 #precalculate input spieks in mnist        XXX
