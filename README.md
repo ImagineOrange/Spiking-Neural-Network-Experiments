@@ -27,3 +27,6 @@ The networks in this repo are sparsely connected, and have modifiable topologies
 ![Network visualization showing sparse connections and node activity](https://github.com/user-attachments/assets/fee5d93d-233e-4405-a015-d074a1fd1ae4)
 
 ![Activity raster plot showing spikes over time for different neurons](https://github.com/user-attachments/assets/b932a870-d15c-4e6d-a424-508d8dde3f9e)
+
+![vis_digit_0_example_structure copy](https://github.com/user-attachments/assets/13f5652c-879f-44b9-b498-9c60fdffd87c)
+
