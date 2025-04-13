@@ -1,4 +1,4 @@
-# Neuronal Modeling and Circuit Dynamics Project
+# Neuronal Modeling and Circuit Dynamics
 
 The aim of this repo is to develop my understanding on neuronal modeling and circuit dynamics. These neuron models are very different from the types found in artificial neural networks (ANNs) used in deep learning. They are called **Leaky-Integrate and Fire (LIF)** models. They compute over time, and are capable of integrating signals from many synaptic connections. LIF neurons model their own membrane potentials, and fire action potentials.
 
@@ -10,17 +10,17 @@ Inhibitory inputs increase inhibitory conductance (`g_i`). These conductances in
 
 The networks in this repo are sparsely connected, and have modifiable topologies (layered, circular, etc...). Activity in these networks is very dynamic, and parameters need to be chosen carefully to avoid sub-critical (silence) and super-critical (tonic firing, seizure-like) states. Neuron parameters are chosen to be as biologically plausible as possible. Network excitation/inhibition ratio and sparse connection probabilities are biologically plausible also.
 
-This project has several goals:
+**This project has several goals:**
 
-1. <u>Build LIF neurons and document their behavior.</u>
+1. **Build LIF neurons** and document their behavior.
 
-2. <u>Build networks and record their activity in a variety of activity regimes (sub-critical, **critical**, super critical).</u>
+2. **Build networks** and record their activity in a variety of activity regimes (sub-critical, **critical**, super critical)
 
-3. <u>Tune neuron/network params to produce networks with **critical** activity.</u>
+3. Tune neuron/network params to produce networks with **critical** activity
 
-4. <u>Build layered networks capable of learned computational tasks, like digit classification -- initial 'learning' will be via genetic algorithms for a proof-of-concept.</u>
+4. Build layered networks **capable of learned computational tasks**, like digit classification -- initial 'learning' will be via genetic algorithms for a proof-of-concept
 
-5. <u>Implement a learning paradigm like spike-timing-dependent-plasticity (STDP).</u>
+5. Implement a **learning paradigm** like spike-timing-dependent-plasticity (STDP)
 
 *Real Readme coming soon.....*
 
