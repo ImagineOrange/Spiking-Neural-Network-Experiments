@@ -20,9 +20,9 @@ The networks in this repo are sparsely connected, and have modifiable topologies
 
 3. Tune neuron/network params to produce networks with **critical** activity (Achieved -- using grid search on many hyper params, figures in experiment_circular directory)
 
-4. Build layered networks **capable of learned computational tasks**, like digit classification -- initially weights will be selected for using genetic algorithms as a proof-of-concept
+4. Build layered networks **capable of learned computational tasks**, like digit classification -- initially weights will be selected for using genetic algorithms as a proof-of-concept -- IN PROGRESS
 
-5. Implement a **learning paradigm** like spike-timing-dependent-plasticity (STDP)
+5. Implement a **learning paradigm** like spike-timing-dependent-plasticity (STDP) -- IN PROGRESS
 
 *Real Readme coming soon.....*
 
