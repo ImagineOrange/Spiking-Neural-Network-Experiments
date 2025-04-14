@@ -1,13 +1,16 @@
-# visualize_trained_snn.py
+# visualize_trained_snn_v2.py # Renamed for clarity
 # --- Import necessary libraries ---
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import os
 import time
+import pandas as pd
 import random
 import json
 import traceback
+import seaborn as sns
+import torch # Import torch
 from collections import deque, Counter # Added Counter for confusion matrix
 from tqdm import tqdm
 # Added cohen_kappa_score
@@ -29,21 +32,13 @@ except ImportError:
     print("Please ensure this file exists and the class name is correct.")
     exit()
 
-# MNIST Utilities
+
 try:
-    from skimage.transform import downscale_local_mean
-except ImportError:
-    print("Warning: scikit-image not found. Downsampling will fail if factor > 1.")
-    # Dummy function if skimage is missing
-    def downscale_local_mean(image, factors):
-        print("Error: skimage.transform.downscale_local_mean required. Using basic mean.")
-        M,N=image.shape; m,n=factors; R,C=M//m, N//n
-        res = np.zeros((R,C));
-        for i in range(R):
-            for j in range(C): res[i,j]=np.mean(image[i*m:(i+1)*m, j*n:(j+1)*n])
-        return res
-try:
-    from MNIST_utils.MNIST_stimulation_encodings import MNIST_loader,SNNStimulator, downsample_image
+    # SNNStimulator now includes ConvNet definition needed if loading that mode
+    # It's assumed SNNStimulator internally imports ConvNet if needed for its mode
+    from MNIST_utils.MNIST_stimulation_encodings import MNIST_loader, SNNStimulator
+    # Make ConvNet definition available if needed for type hints or direct use (unlikely needed here now)
+    # from MNIST_utils.MNIST_stimulation_encodings import ConvNet # <-- Added import
 except ImportError:
     print("\n--- FATAL ERROR ---")
     print("Could not import from 'MNIST_stimulation_encodings.py'.")
@@ -64,9 +59,9 @@ except ImportError:
     def Layered_plot_layer_wise_raster(*args, **kwargs): print("Dummy: Layered_plot_layer_wise_raster")
     def Layered_visualize_distance_dependences(*args, **kwargs): print("Dummy: Layered_visualize_distance_dependences"); return None, None
 
-# --- Functions Implemented Directly (Replacing mnist_snn_evaluation.py dependency) ---
+# --- Functions Implemented Directly (Keep definitions as provided previously) ---
 
-def load_trained_data(weights_file, connections_file, delays_file, inhib_status_file, pos_file): # Added pos_file argument
+def load_trained_data(weights_file, connections_file, delays_file, inhib_status_file, pos_file):
     """Loads the necessary network state arrays from .npy files."""
     print("Loading trained data arrays...")
     try:
@@ -109,10 +104,11 @@ def create_network_from_data_vectorized(n_neurons_total, neuron_params, dt,
 
     try:
         # --- 1. Instantiate the network with fixed neuron properties ---
+        # Ensure LAYERS_CONFIG is inside neuron_params when calling this
         network = LayeredNeuronalNetworkVectorized(
             n_neurons=n_neurons_total,
             is_inhibitory=inhibitory_status_array, # CRITICAL: Use loaded array
-            **neuron_params # Pass other neuron parameters
+            **neuron_params # Pass other neuron parameters including layers_config
         )
 
         # --- 2. Apply the FIXED delays matrix ---
@@ -123,27 +119,24 @@ def create_network_from_data_vectorized(n_neurons_total, neuron_params, dt,
         # --- 3. Apply the FIXED weights using the connection map ---
         network.set_weights_sparse(weights_vector, connection_map)
 
-        # --- 4. (Optional but recommended) Rebuild graph for visualization consistency ---
+        # --- 4. Rebuild graph for visualization consistency ---
         network.graph.clear_edges()
         print("Populating graph structure based on connection map (for visualization)...")
-        # Determine layer indices from config['layers_config'] if available
         layer_indices_from_config = []
-        layers_config = neuron_params.get('layers_config', []) # Get layers from params if passed
+        layers_config = neuron_params.get('layers_config', []) # Get layers from params
         if layers_config:
              start_idx = 0
              for size in layers_config:
                  layer_indices_from_config.append((start_idx, start_idx + size))
                  start_idx += size
 
-        # Add nodes with attributes
         for i in range(n_neurons_total):
              is_inhib = inhibitory_status_array[i]
              layer_num = -1
-             for idx, (start, end) in enumerate(layer_indices_from_config):
-                  if start <= i < end: layer_num = idx + 1; break
-             network.graph.add_node(i, is_inhibitory=is_inhib, layer=layer_num) # Add minimal node info
+             for lyr_idx, (start, end) in enumerate(layer_indices_from_config):
+                  if start <= i < end: layer_num = lyr_idx + 1; break
+             network.graph.add_node(i, is_inhibitory=is_inhib, layer=layer_num)
 
-        # Add edges specified by the map
         for u, v in connection_map:
             if u < n_neurons_total and v < n_neurons_total:
                  weight = network.weights[u, v]
@@ -153,7 +146,6 @@ def create_network_from_data_vectorized(n_neurons_total, neuron_params, dt,
                  print(f"Warning: Invalid index ({u},{v}) in connection map during graph rebuild.")
 
         print(f"Network reconstruction complete. Graph has {network.graph.number_of_nodes()} nodes, {network.graph.number_of_edges()} edges.")
-        # Return network, layer indices, but NOT pos (as it's loaded separately)
         return network, layer_indices_from_config
 
     except Exception as e:
@@ -161,7 +153,6 @@ def create_network_from_data_vectorized(n_neurons_total, neuron_params, dt,
         traceback.print_exc()
         return None, []
 
-# --- Simulation Function (Copied & Adapted from GA script) ---
 def run_vectorized_simulation(network: LayeredNeuronalNetworkVectorized,
                                  duration=1000.0, dt=0.1,
                                  stim_interval_strength=10, # Renamed for clarity
@@ -170,7 +161,6 @@ def run_vectorized_simulation(network: LayeredNeuronalNetworkVectorized,
                                  show_progress=False):
     """
     Runs the network simulation using vectorized updates.
-    Adapted from Layered_run_unified_simulation for visualization context.
     Focuses on MNIST input, ignoring other stimulation types.
     """
     mnist_spikes_by_step = {}
@@ -185,7 +175,7 @@ def run_vectorized_simulation(network: LayeredNeuronalNetworkVectorized,
 
     n_steps = int(duration / dt)
     activity_record = []
-    ongoing_stimulations = {} # Tracks {neuron_idx: end_time}
+    ongoing_stimulations = {}
 
     sim_loop_iterator = range(n_steps)
     if show_progress:
@@ -198,7 +188,6 @@ def run_vectorized_simulation(network: LayeredNeuronalNetworkVectorized,
         current_stim_conductances.fill(0.0)
         newly_stimulated_indices_this_step = set()
 
-        # --- Apply MNIST Input Stimulation ---
         if step in mnist_spikes_by_step:
             neurons_spiking_now = mnist_spikes_by_step[step]
             stim_end_time = current_time + stim_pulse_duration_ms
@@ -207,39 +196,32 @@ def run_vectorized_simulation(network: LayeredNeuronalNetworkVectorized,
                     if neuron_idx not in ongoing_stimulations:
                          ongoing_stimulations[neuron_idx] = stim_end_time
                          newly_stimulated_indices_this_step.add(neuron_idx)
+                    # Apply conductance regardless of ongoing status for simplicity here
                     current_stim_conductances[neuron_idx] = stim_interval_strength
 
-        # --- Update Ongoing Stimulations ---
         expired_stims = set()
-        for neuron_idx, end_time in ongoing_stimulations.items():
+        for neuron_idx, end_time in list(ongoing_stimulations.items()): # Iterate over copy
             if current_time >= end_time:
                 expired_stims.add(neuron_idx)
-                current_stim_conductances[neuron_idx] = 0.0 # Ensure it's off if expired
-            else:
-                 # Apply conductance if pulse is still active
-                 if 0 <= neuron_idx < network.n_neurons:
-                      if neuron_idx not in newly_stimulated_indices_this_step:
-                           current_stim_conductances[neuron_idx] = stim_interval_strength
+                if neuron_idx in ongoing_stimulations: # Check if not already deleted
+                    del ongoing_stimulations[neuron_idx]
+                # Ensure conductance is zero if expired this step
+                current_stim_conductances[neuron_idx] = 0.0
+            elif 0 <= neuron_idx < network.n_neurons: # If not expired
+                 # Apply conductance if pulse is still active and wasn't just started
+                 if neuron_idx not in newly_stimulated_indices_this_step:
+                    current_stim_conductances[neuron_idx] = stim_interval_strength
 
-        for neuron_idx in expired_stims:
-            if neuron_idx in ongoing_stimulations:
-                 del ongoing_stimulations[neuron_idx]
-
-        # --- Set External Stimulus ---
         network.external_stim_g[:] = current_stim_conductances
-
-        # --- Update Network State ---
-        active_indices = network.update_network(dt) # Vectorized update
+        active_indices = network.update_network(dt)
         activity_record.append(active_indices)
 
-    # --- Cleanup ---
     network.external_stim_g.fill(0.0)
     if show_progress and isinstance(sim_loop_iterator, tqdm):
          sim_loop_iterator.close()
 
     return activity_record
 
-# --- Classification Function (Optional - Modified to handle total sim) ---
 def classify_output_total_sim(activity_record, output_layer_indices, n_classes):
     """Classifies based on TOTAL spike counts in the output layer during the sim."""
     if not output_layer_indices:
@@ -251,113 +233,265 @@ def classify_output_total_sim(activity_record, output_layer_indices, n_classes):
     total_output_spikes = 0
 
     for step_spikes in activity_record:
-        for neuron_idx in step_spikes:
-            if output_start_idx <= neuron_idx < output_end_idx:
-                output_spike_counts[neuron_idx] += 1
-                total_output_spikes += 1
+        # Ensure step_spikes is iterable, handle potential non-iterable types if necessary
+        if hasattr(step_spikes, '__iter__'):
+            for neuron_idx in step_spikes:
+                if output_start_idx <= neuron_idx < output_end_idx:
+                    output_spike_counts[neuron_idx] += 1
+                    total_output_spikes += 1
+        # else: print(f"Warning: Non-iterable item in activity_record: {step_spikes}") # Optional debug
 
     predicted_label = -1
     if total_output_spikes > 0:
-        max_spikes = -1
-        tied_labels = []
-        for neuron_idx, count in output_spike_counts.items():
-             current_label = neuron_idx - output_start_idx # Convert neuron index to class label (0, 1, 2...)
-             if count > max_spikes:
-                  max_spikes = count
-                  predicted_label = current_label
-                  tied_labels = [current_label]
-             elif count == max_spikes:
-                  tied_labels.append(current_label)
-        # Handle ties: If multiple neurons have the max spike count, prediction is ambiguous
-        if len(tied_labels) > 1:
-             # print(f"Ambiguous prediction: Labels {tied_labels} tied with {max_spikes} spikes.") # Optional debug
-             predicted_label = -1 # Ambiguous prediction
+        # Find the neuron index with the maximum spikes
+        predicted_neuron_idx = max(output_spike_counts, key=output_spike_counts.get)
+        max_spikes = output_spike_counts[predicted_neuron_idx]
 
-    # Handle case where no output neurons spiked at all
-    elif total_output_spikes == 0:
-        predicted_label = -1 # No prediction possible
+        # Check for ties
+        tied_indices = [idx for idx, count in output_spike_counts.items() if count == max_spikes]
+        if len(tied_indices) > 1:
+            predicted_label = -1 # Ambiguous prediction on tie
+        else:
+            predicted_label = predicted_neuron_idx - output_start_idx # Convert index to label
+    # else: predicted_label remains -1 (no output spikes)
 
     return predicted_label, output_spike_counts
-# --- End of Directly Implemented Functions ---
 
+# <<< NEW PLOTTING FUNCTION >>>
+def plot_mnist_input_with_feature_map(image, label, feature_map, spike_times_list, stim_duration_ms, save_path):
+    """Creates a 4-panel figure: MNIST image, 7x7 feature map, input spike raster."""
+    print(f"Generating MNIST input + feature map visualization...")
+    num_input_neurons = len(spike_times_list)
+    total_spikes = sum(len(spikes) for spikes in spike_times_list)
 
-# --- Function to Visualize Input ---
-def plot_mnist_input_details(image, label, spike_times_list, stim_duration_ms, save_path):
-    """Creates a 3-panel figure: MNIST image, intensity histogram, input spike raster."""
-    print(f"Generating MNIST input visualization...")
-    num_input_neurons = len(spike_times_list); total_spikes = sum(len(spikes) for spikes in spike_times_list)
-    fig = plt.figure(figsize=(10, 8), facecolor='#1a1a1a'); gs = gridspec.GridSpec(2, 2, height_ratios=[1, 2], width_ratios=[1, 1], hspace=0.3, wspace=0.3)
-    ax_img = fig.add_subplot(gs[0, 0]); ax_img.imshow(image, cmap='gray', interpolation='nearest'); ax_img.set_title(f"Input Image (Label: {label}, {image.shape[0]}x{image.shape[1]})", color='white'); ax_img.set_xticks([]); ax_img.set_yticks([]); [spine.set_color('gray') for spine in ax_img.spines.values()]
-    ax_hist = fig.add_subplot(gs[0, 1]); img_flat = image.flatten(); max_val = img_flat.max(); img_flat = img_flat / max_val if max_val > 1.0 else img_flat; ax_hist.hist(img_flat, bins=10, range=(0, 1), color='skyblue', edgecolor='white', alpha=0.8); ax_hist.set_title("Intensity Distribution", color='white'); ax_hist.set_xlabel("Pixel Intensity", color='white'); ax_hist.set_ylabel("Count", color='white'); ax_hist.set_facecolor('#1a1a1a'); ax_hist.tick_params(colors='white'); [spine.set_color('white') for spine in ax_hist.spines.values()]; ax_hist.grid(True, alpha=0.2, axis='y')
-    ax_raster = fig.add_subplot(gs[1, :]); raster_times = []; raster_neurons = []
+    fig = plt.figure(figsize=(12, 9), facecolor='#1a1a1a') # Adjusted size
+    # Create a 2x2 grid
+    gs = gridspec.GridSpec(2, 2, height_ratios=[1, 2], width_ratios=[1, 1], hspace=0.4, wspace=0.3)
+
+    # Panel 1: Input Image
+    ax_img = fig.add_subplot(gs[0, 0])
+    ax_img.imshow(image, cmap='gray', interpolation='nearest')
+    ax_img.set_title(f"Input Image (Label: {label})", color='white')
+    ax_img.set_xticks([]); ax_img.set_yticks([])
+    [spine.set_color('gray') for spine in ax_img.spines.values()]
+
+    # Panel 2: Feature Map
+    ax_feat = fig.add_subplot(gs[0, 1])
+    if feature_map is not None and feature_map.shape == (7, 7):
+        im = ax_feat.imshow(feature_map, cmap='viridis', interpolation='nearest')
+        ax_feat.set_title("CNN 7x7 Feature Map", color='white')
+        plt.colorbar(im, ax=ax_feat, fraction=0.046, pad=0.04) # Add colorbar
+    else:
+        ax_feat.text(0.5, 0.5, "Feature Map\nNot Available", color='grey', ha='center', va='center')
+        ax_feat.set_title("CNN Feature Map", color='white')
+    ax_feat.set_xticks([]); ax_feat.set_yticks([])
+    [spine.set_color('gray') for spine in ax_feat.spines.values()]
+
+    # Panel 3: Spike Raster (Spanning bottom row)
+    ax_raster = fig.add_subplot(gs[1, :])
+    raster_times = []
+    raster_neurons = []
     for n_idx, spikes in enumerate(spike_times_list):
-        for t in spikes: raster_times.append(t); raster_neurons.append(n_idx)
-    if raster_times: ax_raster.scatter(raster_times, raster_neurons, s=4, color='white', alpha=0.8, marker='|') # Slightly thicker marker
-    ax_raster.set_title(f"Input Spike Encoding ({total_spikes} spikes)", color='white'); ax_raster.set_xlabel("Time (ms)", color='white'); ax_raster.set_ylabel("Input Neuron Index", color='white'); ax_raster.set_xlim(0, stim_duration_ms); ax_raster.set_ylim(-0.5, num_input_neurons - 0.5); ax_raster.invert_yaxis(); ax_raster.set_facecolor('#1a1a1a'); ax_raster.tick_params(colors='white'); [spine.set_color('white') for spine in ax_raster.spines.values()]; ax_raster.grid(True, alpha=0.15, axis='x')
+        if spikes:
+             for t in spikes:
+                 raster_times.append(t)
+                 raster_neurons.append(n_idx)
+    if raster_times: ax_raster.scatter(raster_times, raster_neurons, s=5, color='white', alpha=0.8, marker='|')
+    ax_raster.set_title(f"Input Spike Encoding ({total_spikes} spikes)", color='white')
+    ax_raster.set_xlabel("Time (ms)", color='white')
+    ax_raster.set_ylabel(f"SNN Input Neuron Index ({num_input_neurons})", color='white')
+    ax_raster.set_xlim(0, stim_duration_ms)
+    ax_raster.set_ylim(-0.5, num_input_neurons - 0.5 if num_input_neurons > 0 else 0.5)
+    ax_raster.invert_yaxis()
+    ax_raster.set_facecolor('#1a1a1a')
+    ax_raster.tick_params(colors='white')
+    [spine.set_color('white') for spine in ax_raster.spines.values()]
+    ax_raster.grid(True, alpha=0.15, axis='x')
     for t in np.arange(10, stim_duration_ms, 10): ax_raster.axvline(t, color='grey', linestyle=':', linewidth=0.5, alpha=0.5)
-    fig.suptitle(f"MNIST Input Stimulus Details (Class {label})", fontsize=16, color='white', y=0.98);
-    try:
-         plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout
-    except ValueError as e:
-         print(f"Warning: tight_layout issue: {e}") # Catch potential tight_layout errors
+
+    fig.suptitle(f"MNIST Input Details (Class {label}) - Conv Feature Mode", fontsize=16, color='white', y=0.99)
+    try: plt.tight_layout(rect=[0, 0.03, 1, 0.96]) # Adjust rect
+    except ValueError as e: print(f"Warning: tight_layout issue: {e}")
     try:
         plt.savefig(save_path, dpi=150, facecolor='#1a1a1a', bbox_inches='tight')
-        print(f"Saved MNIST input details plot to {save_path}")
-    except Exception as e:
-        print(f"Error saving input plot {save_path}: {e}")
+        print(f"Saved MNIST input details plot (with feature map) to {save_path}")
+    except Exception as e: print(f"Error saving input plot {save_path}: {e}")
     plt.close(fig)
+# <<< END OF NEW PLOTTING FUNCTION >>>
 
-# --- Function to Plot Evaluation Results ---
-# <<< MODIFIED: Added kappa_score argument and plotting >>>
 def plot_evaluation_results(accuracy, kappa_score, confusion_mat, class_labels, save_path):
     """Creates plots for evaluation: overall accuracy, kappa, and confusion matrix."""
+    # (Keep implementation as provided previously)
     fig = plt.figure(figsize=(10, 5), facecolor='#1a1a1a')
     gs = gridspec.GridSpec(1, 2, width_ratios=[1, 1.5], wspace=0.3)
-
-    # Plot Accuracy and Kappa Text
     ax_acc = fig.add_subplot(gs[0, 0])
-    # <<< MODIFIED: Included Kappa score in the text box >>>
     kappa_text = f"Cohen's Kappa: {kappa_score:.4f}" if kappa_score is not None else "Cohen's Kappa: N/A"
     acc_text = f"Overall Accuracy: {accuracy:.2%}\n{kappa_text}"
-    ax_acc.text(0.5, 0.5, acc_text,
-                fontsize=16, color='lime', ha='center', va='center',
-                bbox=dict(facecolor='black', alpha=0.5, boxstyle='round,pad=0.5'))
-    ax_acc.set_title("Evaluation Metrics", color='white') # Renamed title
+    ax_acc.text(0.5, 0.5, acc_text, fontsize=16, color='lime', ha='center', va='center', bbox=dict(facecolor='black', alpha=0.5, boxstyle='round,pad=0.5'))
+    ax_acc.set_title("Evaluation Metrics", color='white')
     ax_acc.axis('off')
-
-    # Plot Confusion Matrix
     ax_cm = fig.add_subplot(gs[0, 1])
     if confusion_mat is not None and class_labels:
         disp = ConfusionMatrixDisplay(confusion_matrix=confusion_mat, display_labels=class_labels)
-        disp.plot(ax=ax_cm, cmap='viridis', colorbar=True, text_kw={'color': 'black', 'ha': 'center', 'va': 'center'}) # Set text color for visibility on viridis
+        disp.plot(ax=ax_cm, cmap='viridis', colorbar=True, text_kw={'color': 'black', 'ha': 'center', 'va': 'center'})
         ax_cm.set_title("Confusion Matrix", color='white')
         ax_cm.tick_params(axis='x', colors='white', rotation=45)
         ax_cm.tick_params(axis='y', colors='white')
         ax_cm.xaxis.label.set_color('white')
         ax_cm.yaxis.label.set_color('white')
-        # Make colorbar ticks white
         cbar = disp.im_.colorbar
         if cbar:
             cbar.ax.yaxis.set_tick_params(color='white')
             plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white')
-            cbar.set_label(cbar.ax.get_ylabel(), color='white') # Set label color
+            cbar.set_label(cbar.ax.get_ylabel(), color='white')
     else:
         ax_cm.text(0.5, 0.5, "Confusion Matrix\nNot Available", color='white', ha='center', va='center')
         ax_cm.axis('off')
-
-
     plt.suptitle("Trained SNN Evaluation Results", fontsize=16, color='white', y=0.98)
-    try:
-        plt.tight_layout(rect=[0, 0, 1, 0.95])
-    except ValueError as e:
-        print(f"Warning: tight_layout issue: {e}")
-
+    try: plt.tight_layout(rect=[0, 0, 1, 0.95])
+    except ValueError as e: print(f"Warning: tight_layout issue: {e}")
     try:
         plt.savefig(save_path, dpi=150, facecolor='#1a1a1a', bbox_inches='tight')
         print(f"Saved evaluation results plot to {save_path}")
-    except Exception as e:
-        print(f"Error saving evaluation plot {save_path}: {e}")
+    except Exception as e: print(f"Error saving evaluation plot {save_path}: {e}")
     plt.close(fig)
+
+def plot_weight_distribution_by_source(weights_vector, connection_map, inhibitory_status_array, save_path):
+    """
+    Visualizes the distribution of synaptic weights using a histogram and violin plot.
+    Separates weights based on whether the SOURCE neuron is excitatory or inhibitory.
+
+    Args:
+        weights_vector (np.ndarray): 1D array of synaptic weight values (all positive).
+        connection_map (list): List of (source_neuron_idx, target_neuron_idx) tuples.
+        inhibitory_status_array (np.ndarray): Boolean array where True indicates an inhibitory neuron.
+        save_path (str): Path to save the generated plot image.
+    """
+    if weights_vector is None or len(weights_vector) == 0:
+        print("Warning: No weights provided for distribution plotting.")
+        return
+    if connection_map is None or len(connection_map) != len(weights_vector):
+        print("Warning: Connection map is missing or length mismatch with weights vector.")
+        return
+    if inhibitory_status_array is None or len(inhibitory_status_array) == 0:
+        print("Warning: Inhibitory status array is missing.")
+        return
+
+    # Separate weights based on source neuron type
+    excitatory_source_weights = []
+    inhibitory_source_weights = []
+
+    print("Analyzing weights based on source neuron type...")
+    max_neuron_index = inhibitory_status_array.shape[0] - 1
+
+    for i, (u, v) in enumerate(connection_map):
+        # Basic check for valid source index before accessing inhibitory_status_array
+        if 0 <= u <= max_neuron_index:
+            is_source_inhibitory = inhibitory_status_array[u]
+            weight = weights_vector[i] # Assuming weight is positive magnitude
+
+            if is_source_inhibitory:
+                inhibitory_source_weights.append(weight)
+            else:
+                excitatory_source_weights.append(weight)
+        else:
+             # This case should ideally not happen if connection map is correct
+             print(f"Warning: Source neuron index {u} from connection map is out of bounds for inhibitory status array (max index: {max_neuron_index}). Skipping connection {i}.")
+
+
+    excitatory_source_weights = np.array(excitatory_source_weights)
+    inhibitory_source_weights = np.array(inhibitory_source_weights)
+
+    num_total = len(weights_vector)
+    num_exc_source = len(excitatory_source_weights)
+    num_inh_source = len(inhibitory_source_weights)
+
+    print(f"--- Weight Distribution Analysis (by Source Neuron Type) ---")
+    print(f"Total connections analyzed: {num_total}")
+    print(f"  Connections from Excitatory Neurons: {num_exc_source} ({num_exc_source/num_total:.2%})")
+    print(f"  Connections from Inhibitory Neurons: {num_inh_source} ({num_inh_source/num_total:.2%})")
+    if num_total > 0:
+         print(f"  Overall Weight Range (Magnitudes): [{np.min(weights_vector):.4f}, {np.max(weights_vector):.4f}]")
+         if num_exc_source > 0: print(f"  Exc-> Weight Mean: {np.mean(excitatory_source_weights):.4f}, Std Dev: {np.std(excitatory_source_weights):.4f}")
+         if num_inh_source > 0: print(f"  Inh-> Weight Mean: {np.mean(inhibitory_source_weights):.4f}, Std Dev: {np.std(inhibitory_source_weights):.4f}")
+    print("-" * 60)
+
+
+    plt.style.use('dark_background') # Ensure consistent style
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7), facecolor='#1a1a1a', gridspec_kw={'width_ratios': [1.1, 0.9]})
+    fig.suptitle("Synaptic Weight Distribution (by Source Neuron Type)", fontsize=16, color='white', y=0.98)
+
+    # --- Panel 1: Histogram ---
+    ax_hist = axes[0]
+    min_w = np.min(weights_vector) if num_total > 0 else 0
+    max_w = np.max(weights_vector) if num_total > 0 else 1
+    bins = 'auto' if num_total > 10 else np.linspace(min_w, max_w, 10) # Use 'auto' or manual bins
+
+    # Plot histograms overlaid
+    ax_hist.hist(weights_vector, bins=bins, color='cyan', alpha=0.6, label=f'All ({num_total})', density=False)
+    if num_exc_source > 0:
+        ax_hist.hist(excitatory_source_weights, bins=bins, color='lime', alpha=0.7, label=f'From Excitatory Src ({num_exc_source})', density=False)
+    if num_inh_source > 0:
+        ax_hist.hist(inhibitory_source_weights, bins=bins, color='red', alpha=0.7, label=f'From Inhibitory Src ({num_inh_source})', density=False)
+
+    ax_hist.set_title("Weight Value Histogram", color='white')
+    ax_hist.set_xlabel("Synaptic Weight (Magnitude)", color='white')
+    ax_hist.set_ylabel("Frequency Count", color='white')
+    ax_hist.tick_params(colors='white')
+    if num_total > 0: ax_hist.legend(facecolor='#333333', labelcolor='white', framealpha=0.8)
+    ax_hist.grid(True, alpha=0.2, linestyle=':')
+    [spine.set_color('gray') for spine in ax_hist.spines.values()]
+    ax_hist.set_facecolor('#2a2a2a')
+    # ax_hist.axvline(0, color='white', linestyle='--', linewidth=0.8, alpha=0.5) # Line at zero might be less relevant now
+
+    # --- Panel 2: Violin Plot ---
+    ax_violin = axes[1]
+    # Prepare data in a format suitable for seaborn (long format)
+    plot_data = []
+    categories = []
+
+    if num_total > 0:
+        plot_data.extend(weights_vector)
+        categories.extend(['All'] * num_total)
+    if num_exc_source > 0:
+        plot_data.extend(excitatory_source_weights)
+        categories.extend(['From Excitatory'] * num_exc_source)
+    if num_inh_source > 0:
+        plot_data.extend(inhibitory_source_weights)
+        categories.extend(['From Inhibitory'] * num_inh_source)
+
+    if plot_data:
+        df = pd.DataFrame({'Weight Type': categories, 'Weight Value': plot_data})
+
+        # Use seaborn for a nice violin plot showing distribution shape and quartiles
+        sns.violinplot(data=df, x='Weight Type', y='Weight Value', ax=ax_violin,
+                    palette={'All': 'cyan', 'From Excitatory': 'lime', 'From Inhibitory': 'red'},
+                    inner='quartile', # Shows median and quartiles inside violins
+                    linewidth=1.5, saturation=0.7)
+
+        ax_violin.set_title("Weight Distribution Density", color='white')
+        ax_violin.set_ylabel("Synaptic Weight (Magnitude)", color='white')
+        ax_violin.set_xlabel("", color='white') # X-labels are clear enough
+        ax_violin.tick_params(colors='white', axis='y')
+        ax_violin.tick_params(colors='white', axis='x', rotation=10) # Slight rotation for readability
+        ax_violin.grid(True, axis='y', alpha=0.2, linestyle=':')
+        [spine.set_color('gray') for spine in ax_violin.spines.values()]
+        ax_violin.set_facecolor('#2a2a2a')
+        # ax_violin.axhline(0, color='white', linestyle='--', linewidth=0.8, alpha=0.5) # Less relevant now
+    else:
+        ax_violin.text(0.5, 0.5, "No weights to plot", color='grey', ha='center', va='center')
+        ax_violin.set_title("Weight Distribution Density", color='white')
+        ax_violin.axis('off')
+
+    # --- Final Touches ---
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout to prevent title overlap
+    try:
+        plt.savefig(save_path, dpi=150, facecolor='#1a1a1a', bbox_inches='tight')
+        print(f"Saved weight distribution plot (by source) to {save_path}")
+    except Exception as e:
+        print(f"\nError saving weight distribution plot {save_path}: {e}")
+        traceback.print_exc()
+    plt.close(fig) # Close the figure to free memory
 
 
 # --- Main Execution Block ---
@@ -365,8 +499,9 @@ if __name__ == "__main__":
     start_overall_time = time.time()
 
     # --- Configuration Loading ---
-    CONFIG_FILE = "ga_mnist_snn_vectorized_precomputed_output/best_snn_2class_fixed_structure_precomputed_config.json" # <<< ADJUST PATH
-    SAVED_STATE_DIR = os.path.dirname(CONFIG_FILE) # Directory containing .npy files
+    # <<< ADJUST PATH TO THE *OUTPUT* CONFIG of the GA script >>>
+    CONFIG_FILE = "ga_mnist_snn_vectorized_precomputed_output/best_snn_5class_fixed_structure_precomputed_config.json"
+    SAVED_STATE_DIR = os.path.dirname(CONFIG_FILE)
 
     if not os.path.exists(CONFIG_FILE): print(f"FATAL ERROR: Config file not found at {CONFIG_FILE}"); exit()
     if not os.path.isdir(SAVED_STATE_DIR): print(f"FATAL ERROR: Saved state directory not found at {SAVED_STATE_DIR}"); exit()
@@ -374,31 +509,56 @@ if __name__ == "__main__":
     try:
         print(f"Loading configuration from: {CONFIG_FILE}")
         with open(CONFIG_FILE, 'r') as f: config = json.load(f)
+
+        # --- Load encoding mode and related params ---
+        LOADED_ENCODING_MODE = config.get("encoding_mode_used")
+        # Use the specific downsample factor saved for intensity mode, if available
+        DOWNSAMPLE_FACTOR_INTENSITY = config.get("downsample_factor_intensity_mode", config.get("downsample_factor"))
+        CONV_FEATURE_COUNT = 49 # Expected feature count
+        # <<< IMPORTANT: UPDATE THIS PATH TO YOUR ACTUAL CONVNET WEIGHTS >>>
+        CONV_WEIGHTS_PATH = '/Users/ethancrouse/Desktop/Spiking-Neural-Network-Experiments/MNIST_utils/conv_model_weights/conv_model_weights.pth' # Path to CNN weights
+
+        if LOADED_ENCODING_MODE not in ['intensity_to_neuron', 'conv_feature_to_neuron']:
+            raise ValueError(f"Unknown encoding mode loaded from config: '{LOADED_ENCODING_MODE}'")
+        print(f"Loaded model was trained using encoding mode: '{LOADED_ENCODING_MODE}'")
+
+        # --- Dependency check for conv mode ---
+        if LOADED_ENCODING_MODE == 'conv_feature_to_neuron':
+             if not os.path.exists(CONV_WEIGHTS_PATH):
+                 print(f"FATAL ERROR: Encoding mode is '{LOADED_ENCODING_MODE}' but required ConvNet weights file not found at:")
+                 print(f"'{CONV_WEIGHTS_PATH}'")
+                 exit()
+             else:
+                 print(f"Required ConvNet weights for stimulator found: {CONV_WEIGHTS_PATH}")
+
+        # Load other parameters from config
         N_CLASSES = config.get("n_classes")
-        LAYERS_CONFIG = config.get("layers_config")
+        LAYERS_CONFIG = config.get("layers_config") # Should have correct input size stored
         NEURON_CONFIG = config.get("neuron_config")
         SIM_DT = config.get("simulation_dt")
         RANDOM_SEED = config.get("random_seed", None)
-        DOWNSAMPLE_FACTOR = config.get("downsample_factor")
         MNIST_STIM_DURATION_MS = config.get("mnist_stim_duration_ms")
         MAX_FREQ_HZ = config.get("max_frequency_hz")
         BASE_DELAY = config.get("base_transmission_delay_used")
         N_NEURONS_TOTAL = config.get("n_neurons_total")
-        TARGET_CLASSES_FROM_CONFIG = config.get("target_classes", list(range(N_CLASSES))) # Load target classes if saved, else default
+        TARGET_CLASSES_FROM_CONFIG = config.get("target_classes", list(range(N_CLASSES)))
 
-        if None in [N_CLASSES, LAYERS_CONFIG, NEURON_CONFIG, SIM_DT, DOWNSAMPLE_FACTOR,
-                    MNIST_STIM_DURATION_MS, MAX_FREQ_HZ, BASE_DELAY, N_NEURONS_TOTAL]:
+        # Validate essential parameters
+        if None in [N_CLASSES, LAYERS_CONFIG, NEURON_CONFIG, SIM_DT, DOWNSAMPLE_FACTOR_INTENSITY,
+                    MNIST_STIM_DURATION_MS, MAX_FREQ_HZ, BASE_DELAY, N_NEURONS_TOTAL, LOADED_ENCODING_MODE]:
             raise ValueError("One or more critical parameters missing from config file.")
         if not isinstance(NEURON_CONFIG, dict):
             raise ValueError("'neuron_config' in config file must be a dictionary.")
 
+        # --- Configuration for this Eval/Vis script ---
         TOTAL_SIMULATION_DURATION_MS = 150
         STIM_CONFIG = {'strength': 25.0, 'pulse_duration_ms': SIM_DT}
-        ANIMATE_ACTIVITY = False # <<< SET TO False TO SPEED UP, True for GIF
-        EVALUATION_SAMPLES = 4000 # <<< REDUCED for faster testing, increase as needed
-        VIS_OUTPUT_DIR = "evaluation_and_visualization_output" # New dir name
+        ANIMATE_ACTIVITY = False # Set to True to generate activity GIF
+        EVALUATION_SAMPLES = 1000 # Number of test samples to evaluate
+        VIS_OUTPUT_DIR = "evaluation_and_visualization_output"
         if not os.path.exists(VIS_OUTPUT_DIR): os.makedirs(VIS_OUTPUT_DIR)
 
+        # Construct filenames based on loaded config
         BASE_FILENAME = f"best_snn_{N_CLASSES}class_fixed_structure_precomputed"
         WEIGHTS_FILE = os.path.join(SAVED_STATE_DIR, f"{BASE_FILENAME}_weights.npy")
         CONNECTIONS_FILE = os.path.join(SAVED_STATE_DIR, f"{BASE_FILENAME}_connection_map.npy")
@@ -417,6 +577,12 @@ if __name__ == "__main__":
 
     if RANDOM_SEED is not None: print(f"Setting random seed: {RANDOM_SEED}"); random.seed(RANDOM_SEED); np.random.seed(RANDOM_SEED)
 
+    # --- Select Device ---
+    if torch.cuda.is_available(): device = torch.device("cuda")
+    elif torch.backends.mps.is_available(): device = torch.device("mps")
+    else: device = torch.device("cpu")
+    print(f"Using device: {device}")
+
     # --- Load the Trained Network State ---
     print("Loading trained network state...")
     network_obj = None; layer_indices = []; pos_loaded = {}
@@ -425,6 +591,8 @@ if __name__ == "__main__":
             WEIGHTS_FILE, CONNECTIONS_FILE, DELAYS_FILE, INHIB_STATUS_FILE, POS_FILE
         )
         if vis_weights is None or pos_loaded is None: raise ValueError("Failed to load one or more network state files.")
+
+        # Pass the LAYERS_CONFIG loaded from the config file into neuron params
         temp_neuron_config = NEURON_CONFIG.copy(); temp_neuron_config['layers_config'] = LAYERS_CONFIG
         network_obj, layer_indices = create_network_from_data_vectorized(
             n_neurons_total=N_NEURONS_TOTAL, neuron_params=temp_neuron_config, dt=SIM_DT,
@@ -440,7 +608,7 @@ if __name__ == "__main__":
     try:
         mnist_loader = MNIST_loader()
         all_labels = mnist_loader.labels.astype(int)
-        all_images = mnist_loader.images
+        all_images = mnist_loader.images # Loader provides normalized 0-1 images
         # Find indices for the TEST set belonging to the target classes
         test_mask = (np.arange(len(all_labels)) >= MNIST_TRAIN_SIZE) & (np.isin(all_labels, TARGET_CLASSES_FROM_CONFIG))
         test_indices = np.where(test_mask)[0]
@@ -465,35 +633,60 @@ if __name__ == "__main__":
     true_labels = []
     correct_predictions = 0
     try:
-        mnist_stimulator_eval = SNNStimulator(total_time_ms=MNIST_STIM_DURATION_MS, max_freq_hz=MAX_FREQ_HZ)
+        # --- Initialize stimulator based on loaded mode ---
+        print(f"Initializing SNNStimulator for evaluation (mode: '{LOADED_ENCODING_MODE}')...")
+        mnist_stimulator_eval = SNNStimulator(
+            total_time_ms=MNIST_STIM_DURATION_MS,
+            max_freq_hz=MAX_FREQ_HZ,
+            mode=LOADED_ENCODING_MODE,         # Use loaded mode
+            conv_weights_path=CONV_WEIGHTS_PATH, # Pass path (used only if mode is conv)
+            device=device                      # Pass device (used only if mode is conv)
+        )
+
         eval_loop_iterator = tqdm(eval_indices, desc="Evaluating Network", ncols=80)
 
         for idx in eval_loop_iterator:
             try:
-                mnist_original_image = all_images[idx].reshape(28, 28)
+                # Get original 28x28 image (scaled 0-1 by loader)
+                mnist_original_image_0_1 = all_images[idx].reshape(28, 28)
                 true_label = all_labels[idx]
-                if DOWNSAMPLE_FACTOR > 1:
-                    mnist_image_to_stimulate = downsample_image(mnist_original_image, DOWNSAMPLE_FACTOR)
-                else:
-                    mnist_image_to_stimulate = mnist_original_image
 
-                mnist_spike_times = mnist_stimulator_eval.generate_spikes(mnist_image_to_stimulate)
+                # --- Prepare image based on loaded mode ---
+                # Pass 0-255 range image to stimulator's generate_spikes
+                if LOADED_ENCODING_MODE == 'intensity_to_neuron':
+                    if DOWNSAMPLE_FACTOR_INTENSITY > 1:
+                        image_for_stimulator = downscale_image(mnist_original_image_0_1 * 255.0, DOWNSAMPLE_FACTOR_INTENSITY)
+                    else:
+                        image_for_stimulator = mnist_original_image_0_1 * 255.0
+                elif LOADED_ENCODING_MODE == 'conv_feature_to_neuron':
+                    # Conv mode stimulator needs the original 28x28
+                    image_for_stimulator = mnist_original_image_0_1 * 255.0
+                else:
+                     # Should not happen due to earlier check
+                     raise ValueError(f"Invalid encoding mode during evaluation loop: {LOADED_ENCODING_MODE}")
+                # --- End Image Preparation ---
+
+                # Generate spikes using the correct mode and prepared image
+                mnist_spike_times = mnist_stimulator_eval.generate_spikes(image_for_stimulator)
+
                 network_obj.reset_all() # Reset network state for each sample
                 activity_record = run_vectorized_simulation(
                     network_obj, duration=TOTAL_SIMULATION_DURATION_MS, dt=SIM_DT,
                     mnist_input_spikes=mnist_spike_times,
                     stim_interval_strength=STIM_CONFIG['strength'],
                     stim_pulse_duration_ms=STIM_CONFIG['pulse_duration_ms'],
-                    show_progress=False # Progress bar is handled by tqdm above
+                    show_progress=False
                 )
-                predicted_label, _ = classify_output_total_sim( # Use total sim classification
+                predicted_label, _ = classify_output_total_sim(
                     activity_record, layer_indices[-1] if layer_indices else None, N_CLASSES
                 )
                 predictions.append(predicted_label)
                 true_labels.append(true_label)
+
                 # Check for correctness based on valid predictions only
                 if predicted_label != -1 and predicted_label == true_label:
                      correct_predictions += 1
+
                 # Update tqdm description with running accuracy
                 if len(predictions) > 0:
                     valid_preds_so_far = [p for p in predictions if p != -1]
@@ -503,6 +696,8 @@ if __name__ == "__main__":
 
             except Exception as e:
                 print(f"\nWarning: Error during evaluation for index {idx}: {e}")
+                # Log traceback for debugging individual sample errors if needed
+                # traceback.print_exc()
                 predictions.append(-1) # Indicate error/no prediction
                 true_labels.append(all_labels[idx]) # Still record true label
 
@@ -511,12 +706,11 @@ if __name__ == "__main__":
 
         # Calculate Final Metrics
         overall_accuracy = 0.0
-        kappa_score = None # Initialize kappa
-        cm = None # Initialize confusion matrix
+        kappa_score = None
+        cm = None
         cm_labels = [str(l) for l in TARGET_CLASSES_FROM_CONFIG]
 
         if actual_eval_samples > 0:
-            # Filter out -1 predictions for metric calculations
             valid_preds_mask = [p != -1 for p in predictions]
             num_valid_predictions = sum(valid_preds_mask)
 
@@ -524,45 +718,36 @@ if __name__ == "__main__":
                  true_labels_valid = np.array(true_labels)[valid_preds_mask]
                  predictions_valid = np.array(predictions)[valid_preds_mask]
 
-                 # Accuracy (based on valid predictions)
                  correct_valid_predictions = sum(1 for i, p in enumerate(predictions) if p != -1 and p == true_labels[i])
                  overall_accuracy = correct_valid_predictions / num_valid_predictions
                  print(f"Overall Accuracy (on {num_valid_predictions} valid predictions): {overall_accuracy:.4f}")
 
-                 # <<< ADDED: Cohen's Kappa Calculation >>>
                  try:
                      kappa_score = cohen_kappa_score(true_labels_valid, predictions_valid, labels=TARGET_CLASSES_FROM_CONFIG)
                      print(f"Cohen's Kappa Score: {kappa_score:.4f}")
                  except ValueError as e:
-                     print(f"Could not calculate Cohen's Kappa: {e}") # e.g., if only one class predicted
+                     print(f"Could not calculate Cohen's Kappa: {e}")
                      kappa_score = None
 
-                 # Confusion Matrix
                  cm = confusion_matrix(true_labels_valid, predictions_valid, labels=TARGET_CLASSES_FROM_CONFIG)
             else:
-                print("No valid predictions were made during evaluation. Accuracy and Kappa cannot be calculated.")
-                overall_accuracy = 0.0
-                kappa_score = None
-                cm = None
+                print("No valid predictions were made during evaluation.")
         else:
             print("No samples were evaluated.")
 
-
         # --- Plot Evaluation Results ---
-        # <<< MODIFIED: Pass kappa_score to the plotting function >>>
         if actual_eval_samples > 0:
             plot_evaluation_results(
-                overall_accuracy, kappa_score, cm, cm_labels, # Pass kappa
+                overall_accuracy, kappa_score, cm, cm_labels,
                 os.path.join(VIS_OUTPUT_DIR, "evaluation_summary.png")
             )
         else:
-            print("Skipping evaluation plotting as no samples were evaluated.")
+            print("Skipping evaluation plotting.")
 
     except Exception as e: print(f"FATAL ERROR during evaluation: {e}"); traceback.print_exc(); exit()
 
 
     # --- (Optional) Generate Visualizations for ONE Example ---
-    # You can choose a specific example or the first one from the eval set
     print("\n(Optional) Generating detailed visualizations for one example...")
     vis_example_index = eval_indices[0] if len(eval_indices) > 0 else -1 # Use first evaluated sample
     TARGET_VIS_CLASS = all_labels[vis_example_index] if vis_example_index != -1 else -1
@@ -570,53 +755,111 @@ if __name__ == "__main__":
     if vis_example_index != -1:
         print(f"Visualizing example index: {vis_example_index} (True Label: {TARGET_VIS_CLASS})")
         try:
-            # Regenerate spikes/run sim just for this one example to ensure clean state/record
-            vis_image_orig = all_images[vis_example_index].reshape(28, 28)
-            if DOWNSAMPLE_FACTOR > 1: vis_image_stim = downsample_image(vis_image_orig, DOWNSAMPLE_FACTOR)
-            else: vis_image_stim = vis_image_orig
-            vis_stimulator = SNNStimulator(total_time_ms=MNIST_STIM_DURATION_MS, max_freq_hz=MAX_FREQ_HZ)
-            vis_spike_times = vis_stimulator.generate_spikes(vis_image_stim)
-            plot_mnist_input_details(vis_image_stim, TARGET_VIS_CLASS, vis_spike_times, MNIST_STIM_DURATION_MS, os.path.join(VIS_OUTPUT_DIR, f"vis_input_digit_{TARGET_VIS_CLASS}_example.png"))
+            # Get original 28x28 image (0-1)
+            vis_image_orig_0_1 = all_images[vis_example_index].reshape(28, 28)
 
+            # --- Initialize stimulator and prepare image based on loaded mode ---
+            print(f"Initializing SNNStimulator for visualization (mode: '{LOADED_ENCODING_MODE}')...")
+            vis_stimulator = SNNStimulator(
+                total_time_ms=MNIST_STIM_DURATION_MS,
+                max_freq_hz=MAX_FREQ_HZ,
+                mode=LOADED_ENCODING_MODE,
+                conv_weights_path=CONV_WEIGHTS_PATH,
+                device=device
+            )
+            
+        
+            # Prepare image for the stimulator (pass 0-255)
+            if LOADED_ENCODING_MODE == 'intensity_to_neuron':
+                if DOWNSAMPLE_FACTOR_INTENSITY > 1:
+                    image_for_stimulator_vis = downscale_image(vis_image_orig_0_1 * 255.0, DOWNSAMPLE_FACTOR_INTENSITY)
+                else:
+                    image_for_stimulator_vis = vis_image_orig_0_1 * 255.0
+            
+                # Image to plot is the one used by stimulator
+                image_to_plot_final = image_for_stimulator_vis / 255.0 # Normalize for plotting
+            elif LOADED_ENCODING_MODE == 'conv_feature_to_neuron':
+                # Stimulator needs 28x28 (0-255)
+                image_for_stimulator_vis = vis_image_orig_0_1 * 255.0
+                # Image to plot is still the original 28x28
+                image_to_plot_final = vis_image_orig_0_1
+            else:
+                raise ValueError(f"Invalid encoding mode during visualization: {LOADED_ENCODING_MODE}")
+
+            # Generate spikes
+            vis_spike_times = vis_stimulator.generate_spikes(image_for_stimulator_vis)
+
+            # --- Extract feature map if in conv mode ---
+            vis_feature_map = None
+            if LOADED_ENCODING_MODE == 'conv_feature_to_neuron':
+                # Use the *original 28x28* image (0-255) for feature map extraction
+                # Ensure the extract_feature_map method exists in SNNStimulator
+                if hasattr(vis_stimulator, 'extract_feature_map'):
+                     vis_feature_map = vis_stimulator.extract_feature_map(vis_image_orig_0_1 * 255.0)
+                else:
+                     print("Warning: SNNStimulator does not have 'extract_feature_map' method. Cannot visualize feature map.")
+            # --- End feature map extraction ---
+
+            # --- Call the new plotting function ---
+            plot_mnist_input_with_feature_map(
+                image_to_plot_final,         # The image to display in the top-left panel
+                TARGET_VIS_CLASS,
+                vis_feature_map,             # Pass the extracted feature map (or None)
+                vis_spike_times,
+                MNIST_STIM_DURATION_MS,
+                os.path.join(VIS_OUTPUT_DIR, f"vis_input_digit_{TARGET_VIS_CLASS}_example_with_features.png") # New filename
+            )
+            # --- End plotting call modification ---
+
+            # Run simulation with these spikes
             network_obj.reset_all()
             vis_activity_record = run_vectorized_simulation(
                 network_obj, duration=TOTAL_SIMULATION_DURATION_MS, dt=SIM_DT,
-                mnist_input_spikes=vis_spike_times, stim_interval_strength=STIM_CONFIG['strength'],
-                stim_pulse_duration_ms=STIM_CONFIG['pulse_duration_ms'], show_progress=True # Show progress for single long sim
+                mnist_input_spikes=vis_spike_times,
+                stim_interval_strength=STIM_CONFIG['strength'],
+                stim_pulse_duration_ms=STIM_CONFIG['pulse_duration_ms'],
+                show_progress=True
             )
 
-            # Re-classify just this example for confirmation
+            # Re-classify
             vis_predicted_label, vis_spike_counts = classify_output_total_sim(
                 vis_activity_record, layer_indices[-1] if layer_indices else None, N_CLASSES
             )
             print(f"Single example classification: Predicted={vis_predicted_label}, True={TARGET_VIS_CLASS}")
             print(f"Single example output spike counts: {vis_spike_counts}")
 
-
-            # Generate visualization plots using vis_activity_record
-            vis_output_prefix = os.path.join(VIS_OUTPUT_DIR, f"vis_digit_{TARGET_VIS_CLASS}_pred_{vis_predicted_label}_example")
+            # --- Generate other visualization plots ---
+            vis_output_prefix = os.path.join(VIS_OUTPUT_DIR, f"vis_digit_{TARGET_VIS_CLASS}_pred_{vis_predicted_label}_mode_{LOADED_ENCODING_MODE}_example") # Add mode to filename
             pos_for_vis = pos_loaded
             if not isinstance(pos_for_vis, dict): pos_for_vis = None
 
             print("Generating structure plot...")
+            # Ensure stimulated/connected neurons are handled if needed by plot function
             Layered_plot_network_connections_sparse(network=network_obj, pos=pos_for_vis, edge_percent=100, save_path=f"{vis_output_prefix}_structure.png")
+
+            print("\nGenerating weight distribution plot by source neuron type...")
+            weight_dist_save_path = os.path.join(VIS_OUTPUT_DIR, f"{BASE_FILENAME}_weight_distribution_by_source.png") # New filename
+            # Call the NEW function with the required arguments
+            plot_weight_distribution_by_source(
+                weights_vector=vis_weights,         # The loaded weights vector
+                connection_map=vis_map,             # The loaded connection map
+                inhibitory_status_array=vis_inhib_status, # The loaded inhibitory status array
+                save_path=weight_dist_save_path     # The path to save the plot
+)
 
             if pos_for_vis and network_obj.graph.number_of_nodes() > 0:
                 print("Generating distance dependence plots...")
                 try:
-                     # Pick a neuron from the first layer for distance plots if possible
                      neuron_for_dist_plot = 0
                      if layer_indices and len(layer_indices) > 0:
-                          first_layer_start, first_layer_end = layer_indices[0]
+                          first_layer_start, _ = layer_indices[0]
                           if first_layer_start < network_obj.n_neurons:
-                               neuron_for_dist_plot = first_layer_start # Use the first neuron of the first layer
-
+                               neuron_for_dist_plot = first_layer_start
                      w_fig, d_fig = Layered_visualize_distance_dependences(network=network_obj, pos=pos_for_vis, neuron_idx=neuron_for_dist_plot, base_transmission_delay=BASE_DELAY, save_path_base=f"{vis_output_prefix}_neuron{neuron_for_dist_plot}_dist")
                      if w_fig: plt.close(w_fig)
                      if d_fig: plt.close(d_fig)
                 except Exception as dist_e:
                     print(f"Warning: Could not generate distance dependence plots: {dist_e}")
-
 
             if layer_indices:
                  print("Generating activity PSTH plot...")

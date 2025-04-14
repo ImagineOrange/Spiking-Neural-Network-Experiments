@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 plt.style.use('dark_background') # Apply style early
 import time # To measure execution time
 import random
+import torch.nn as nn
+import torch
 from collections import deque # Used in LayeredNeuronalNetwork
 from tqdm import tqdm # Progress bar
 import os # For creating directories
@@ -580,129 +582,100 @@ class GeneticAlgorithm:
          self.fitness_scores = np.full(self.population_size, -np.inf) # Reset fitness for next gen
 
 
-# In genetic_experiment_vectorized.py
-
-# --- Assume calculate_prediction is modified to return: (predicted_label, output_spike_counts) ---
-# def calculate_prediction(activity_record, layer_indices, dt, stim_duration_ms, n_classes=5):
-#    ... # Modified logic from previous turn
-#    return predicted_label, output_spike_counts
-
 
 # --- MODIFIED Fitness Function with Correct Formatting ---
-def evaluate_chromosome_fitness(chromosome_weights,       # The weights to evaluate
-                                # Network Structure Params (FIXED - Passed from main)
-                                p_total_neurons, p_neuron_config, p_layer_indices,
-                                p_fixed_inhib_array, p_fixed_delays_matrix, p_connection_map,
-                                p_n_classes, # Pass number of classes
+def evaluate_chromosome_fitness(chromosome_weights,    # Current weights
+                                p_eval_network,       # <<< The persistent network object passed in
+                                p_connection_map,     # Needed for set_weights_sparse
+                                p_layer_indices,      # Needed for calculate_prediction
+                                p_n_classes,          # Needed for calculate_prediction
                                 # Data Params
-                                p_filtered_images, p_filtered_labels, p_label_map,
-                                p_eval_indices, # Specific indices for this evaluation run
+                                p_filtered_labels, p_label_map,
+                                p_eval_indices,
                                 p_precomputed_spikes, # <<< This dictionary holds the precomputed spikes
                                 # Simulation Params
                                 p_sim_duration, p_dt, p_stim_config,
-                                p_downsample_factor, p_mnist_stim_duration, p_max_freq_hz): # These last 3 params are no longer needed here
+                                p_mnist_stim_duration # Potentially needed by calculate_prediction
+                               ):
     """
-    Fitness function designed for parallel execution.
-    MODIFIED: Uses precomputed spikes passed via p_precomputed_spikes.
+    Fitness function using a persistent network object and precomputed spikes.
     """
-    # --- 1. Create a MINIMAL network instance for evaluation ---
     try:
-        # Pass essential parameters, including the fixed inhibitory array
-        eval_network = LayeredNeuronalNetworkVectorized(
-            n_neurons=p_total_neurons,
-            is_inhibitory=p_fixed_inhib_array, # CRITICAL: Use fixed array
-            **p_neuron_config # Pass other neuron parameters (taus, thresholds, etc.)
-        )
-        # Apply the FIXED delays
-        eval_network.delays = p_fixed_delays_matrix.copy() # Use copy for safety
+        # 1. Reset the persistent network's state variables
+        # Clears voltage, conductances, etc. from the previous evaluation run
+        p_eval_network.reset_all()
 
-        eval_network.reset_all() # Reset state arrays (v, g_e, g_i, etc.)
+        # 2. Set the new weights for this chromosome ON THE PERSISTENT network
+        # Uses the connection map to apply weights from the chromosome vector
+        p_eval_network.set_weights_sparse(chromosome_weights, p_connection_map)
 
-        # --- 2. Set weights (using the fixed connection map) ---
-        eval_network.set_weights_sparse(chromosome_weights, p_connection_map)
+        # --- Network Instantiation and Graph Population REMOVED ---
+        # These steps are no longer needed as the network object is created once outside
 
-        # --- 3. POPULATE GRAPH FOR EVAL_NETWORK ---
-        # (Graph population code remains unchanged)
-        for i in range(p_total_neurons):
-            eval_network.graph.add_node(i, is_inhibitory=p_fixed_inhib_array[i])
-        for u, v in p_connection_map:
-            if u < p_total_neurons and v < p_total_neurons:
-                weight = eval_network.weights[u, v]
-                delay = eval_network.delays[u, v]
-                eval_network.graph.add_edge(u, v, weight=weight, delay=delay)
-
-    except ValueError as e:
-        return -np.inf
     except Exception as e:
+        # print(f"Worker Error setting up network: {e}") # Optional debug
+        # Return lowest possible fitness if setup fails
         return -np.inf
 
-
-    # --- 4. Create SNN Stimulator locally --- <<< REMOVED >>>
-    # This section is no longer needed as spikes are precomputed.
-
-    # --- 5. Run simulation on the specified subset of filtered data ---
+    # --- Run simulation on the specified subset of filtered data ---
     accuracies = []
 
-    # Check if evaluation indices are valid for the filtered data
+    # Validate evaluation indices
     if not hasattr(p_eval_indices, '__len__') or len(p_eval_indices) == 0:
          return 0.0
     if len(p_filtered_labels) == 0:
          return 0.0
-
     valid_eval_indices = [idx for idx in p_eval_indices if 0 <= idx < len(p_filtered_labels)]
     if not valid_eval_indices:
          return 0.0
 
-    for idx in valid_eval_indices: # Iterate only through valid indices
+    # Loop through the assigned evaluation examples for this chromosome
+    for idx in valid_eval_indices:
         try:
-            # Get true label (no change)
+            # Get true label (no change needed)
             true_original_label = p_filtered_labels[idx]
             if true_original_label not in p_label_map:
                  continue
             true_mapped_label = p_label_map[true_original_label]
 
-            # --- Get PRECOMPUTED spikes (REPLACE generation) --- <<< CHANGED >>>
-            # Remove image loading/processing/downsampling here
-            # Remove local stimulator instantiation and call to generate_spikes
-
-            # *** Retrieve spikes from the dictionary ***
+            # --- Get PRECOMPUTED spikes --- <<< CHANGED >>>
+            # Retrieve spikes from the dictionary passed as an argument
             mnist_spike_times = p_precomputed_spikes.get(idx, None)
             if mnist_spike_times is None:
-                # If precomputation failed for this index, skip it
+                # If precomputation failed for this index, skip this example
+                # print(f"Worker Warning: Precomputed spikes missing for index {idx}. Skipping.") # Optional debug
                 continue
-            # *** End Retrieval ***
+            # --- End Retrieval ---
 
-            # Run simulation using the retrieved precomputed spikes
+            # Run simulation using the persistent, updated network & retrieved spikes
             activity_record = run_snn_simulation(
-                eval_network,
+                p_eval_network, # Use the persistent network object
                 duration=p_sim_duration,
                 dt=p_dt,
                 mnist_input_spikes=mnist_spike_times, # Use the retrieved spikes
                 stimulation_params=p_stim_config
             )
 
-            # Get prediction (no change)
+            # Get prediction (no change needed)
             predicted_label, output_counts = calculate_prediction(
                 activity_record, p_layer_indices, dt=p_dt,
-                stim_duration_ms=p_mnist_stim_duration, # Still needed for prediction logic? Check calculate_prediction
+                stim_duration_ms=p_mnist_stim_duration, # Pass this along
                 n_classes=p_n_classes
             )
 
-            # Calculate accuracy (no change)
+            # Calculate accuracy (no change needed)
             if predicted_label != -1:
                  is_correct = (predicted_label == true_mapped_label)
                  accuracies.append(1 if is_correct else 0)
 
-        # Error handling (no change)
-        except KeyError as e:
-             continue
-        except IndexError as e:
-             continue
         except Exception as e:
-             continue
+            # print(f"Worker Error during sim/pred for index {idx}: {e}") # Optional debug
+            # Skip this example if an error occurs during simulation or prediction
+            continue
 
-    # --- 6. Return average accuracy as fitness --- (no change)
+    # --- Return average accuracy as fitness --- (no change needed)
     fitness = np.mean(accuracies) if accuracies else 0.0
+    # Ensure fitness is not NaN (can happen if all examples resulted in errors or no predictions)
     if np.isnan(fitness):
         fitness = 0.0
     return fitness
@@ -754,23 +727,23 @@ def plot_ga_progress(generations, best_fitness_history, avg_fitness_history, fin
 
 
 
-# --- Main Execution Block (MODIFIED FOR PRECOMPUTATION) ---
+# --- Main Execution Block (MODIFIED FOR DYNAMIC INPUT & PERSISTENT NETWORK) ---
 if __name__ == "__main__":
     multiprocessing.freeze_support() # For compatibility
 
     start_overall_time = time.time()
 
-    # --- Configuration (Mostly Unchanged) ---
-    TARGET_CLASSES = [0,1,2,3,4] # Example: Classify digits 0, 1, 2
+    # --- Configuration ---
+    TARGET_CLASSES = [0,1,2] # Example: Classify digits 0, 1, 2
     N_CLASSES = len(TARGET_CLASSES)
     label_map_global = {original_label: new_index for new_index, original_label in enumerate(TARGET_CLASSES)}
-    print(f"--- Running {N_CLASSES}-Class MNIST GA SNN (Vectorized - Fixed Structure, Precomputed Spikes) ---") # Updated print
+    print(f"--- Running {N_CLASSES}-Class MNIST GA SNN (Vectorized - Fixed Structure, Precomputed Spikes) ---")
     print(f"Target Digits: {TARGET_CLASSES} -> Mapped Indices: {list(range(N_CLASSES))}")
 
     POPULATION_SIZE = 100
-    NUM_GENERATIONS = 30
+    NUM_GENERATIONS = 20
     MUTATION_RATE = 0.01
-    MUTATION_STRENGTH = 0.005
+    MUTATION_STRENGTH = 0.01
     CROSSOVER_RATE = 0.7
     ELITISM_COUNT = 2
     TOURNAMENT_SIZE = 5
@@ -778,43 +751,66 @@ if __name__ == "__main__":
     N_CORES = max(1, os.cpu_count() - 1 if os.cpu_count() else 1) # Use almost all cores
     print(f"Using {N_CORES} cores for parallel evaluation.")
 
+    # --- MODIFICATION: Select Encoding Mode ---
+    ENCODING_MODE = 'conv_feature_to_neuron' # Options: 'intensity_to_neuron' or 'conv_feature_to_neuron'
+    CONV_WEIGHTS_PATH = '/Users/ethancrouse/Desktop/Spiking-Neural-Network-Experiments/MNIST_utils/conv_model_weights/conv_model_weights.pth' # Needed if using conv mode
+    DOWNSAMPLE_FACTOR_INTENSITY_MODE = 4 # Specific factor ONLY for intensity mode SNN input layer size
+    CONV_FEATURE_COUNT = 49 # Number of features from CNN if using conv mode
+
     mnist_stim_duration_global = 50  # ms
     max_freq_hz_global = 200.0       # Hz
-    downsample_factor_global = 4     # 28x28 -> 7x7 = 49 inputs
-    sim_duration_global = 90        # ms
+    sim_duration_global = 90         # ms
     sim_dt_global = 0.1              # ms
 
-    input_neurons = (28 // downsample_factor_global) ** 2
-    layers_config_global = [input_neurons, 30, 20,  N_CLASSES]
-    inhib_frac_global = 0.2
+    # --- MODIFICATION: Determine SNN input layer size based on mode ---
+    if ENCODING_MODE == 'intensity_to_neuron':
+        input_neurons = (28 // DOWNSAMPLE_FACTOR_INTENSITY_MODE) ** 2
+        print(f"Setting SNN input layer size to {input_neurons} for intensity mode.")
+    elif ENCODING_MODE == 'conv_feature_to_neuron':
+        input_neurons = CONV_FEATURE_COUNT
+        print(f"Setting SNN input layer size to {input_neurons} for conv feature mode.")
+    else:
+         raise ValueError(f"Invalid ENCODING_MODE: {ENCODING_MODE}")
 
+    # Define layer config using the determined input size
+    layers_config_global = [input_neurons, 30, 20,  N_CLASSES] # Uses the correct input_neurons now
+
+    inhib_frac_global = 0.2
     conn_probs_global = { # Keep using probabilities for initial structure generation
         'exc_recurrent': 0.12, 'inh_recurrent': 0.15, 'feedforward_1': 0.3,
         'feedforward_2': 0.15, 'feedback_1': 0.06, 'feedback_2': 0.0,
         'long_feedforward': 0.0, 'long_feedback': 0.0
     }
-
     neuron_config_global = {
         'v_rest': -65.0, 'v_threshold': -55.0, 'v_reset': -75.0,
         'tau_m': 10.0, 'tau_ref': 1.5, 'tau_e': 3.0, 'tau_i': 7.0,
         'e_reversal': 0.0, 'i_reversal': -70.0,
         'v_noise_amp': 0.0, 'i_noise_amp': 0.0005,
         'adaptation_increment': 0.3, 'tau_adaptation': 120,
-        # 'is_inhibitory' will be generated in create_snn_structure
     }
-
-    weight_min_ga_global = 0.002 # Allow inhibitory weights directly
+    weight_min_ga_global = 0.002
     weight_max_ga_global = 0.35
-
     stim_config_global = {'strength': 25, 'pulse_duration_ms': sim_dt_global}
+
+    # --- Dependency Check ---
+    if ENCODING_MODE == 'conv_feature_to_neuron':
+        if not os.path.exists(CONV_WEIGHTS_PATH):
+            print(f"FATAL ERROR: Encoding mode is '{ENCODING_MODE}' but ConvNet weights file not found at:")
+            print(f"'{CONV_WEIGHTS_PATH}'")
+            print("Please train the CNN first using the appropriate script.")
+            exit()
+        else:
+            print(f"ConvNet weights file found at: {CONV_WEIGHTS_PATH}")
+
     master_seed = 42
     np.random.seed(master_seed)
     random.seed(master_seed)
-    output_dir = "ga_mnist_snn_vectorized_precomputed_output" # Changed output dir name
+    output_dir = "ga_mnist_snn_vectorized_precomputed_output"
     if not os.path.exists(output_dir): os.makedirs(output_dir)
-    # -------------------------------------
 
-    # --- Load and Filter MNIST Data (Unchanged) ---
+    # ------------------------------------------------------------------------------------------------------
+
+    # --- Load and Filter MNIST Data ---
     print("Loading MNIST dataset...")
     try:
         mnist_loader = MNIST_loader()
@@ -833,98 +829,117 @@ if __name__ == "__main__":
         print(f"Using {len(train_eval_indices_pool)} examples for GA eval sampling, {len(test_indices_pool)} for final testing.")
         if len(train_eval_indices_pool) < FITNESS_EVAL_EXAMPLES:
              print(f"Warning: Pool for GA eval ({len(train_eval_indices_pool)}) is smaller than requested eval size ({FITNESS_EVAL_EXAMPLES}). Using pool size.")
-    
-
     except Exception as e: print(f"Error loading/filtering MNIST: {e}. Exiting."); exit()
 
     # --- Create FIXED Base Network Structure ONCE ---
     print("Creating FIXED base SNN structure...")
     try:
         network_creation_args = {
-            "n_layers_list": layers_config_global,
+            "n_layers_list": layers_config_global, # Uses dynamically set input_neurons
             "inhibitory_fraction": inhib_frac_global,
             "connection_probs": conn_probs_global,
             "neuron_params_dict": neuron_config_global,
-            "base_transmission_delay": 1.0, # Example value
+            "base_transmission_delay": 1.0,
             "dt": sim_dt_global,
             "random_seed": master_seed,
             "n_classes": N_CLASSES
         }
-        # Call structure creation ONCE
-        base_network, layer_indices_global, pos_global, connection_map_global = \
+        # --- MODIFICATION: Store the returned network as the persistent object ---
+        persistent_eval_network, layer_indices_global, pos_global, connection_map_global = \
             create_snn_structure(**network_creation_args)
 
-        # Extract FIXED structural info
-        fixed_inhib_array_global = base_network.is_inhibitory.copy()
-        fixed_delays_matrix_global = base_network.delays.copy()
+        # Extract FIXED structural info needed by the GA or saving
         chromosome_len_global = len(connection_map_global)
-        total_neurons_global = base_network.n_neurons
+        total_neurons_global = persistent_eval_network.n_neurons
 
-        # Sanity check
-        if fixed_inhib_array_global.shape[0] != total_neurons_global:
-             raise ValueError("Inhibitory array size mismatch")
-        if fixed_delays_matrix_global.shape != (total_neurons_global, total_neurons_global):
-             raise ValueError("Delays matrix size mismatch")
-        if chromosome_len_global == 0:
-             print("Warning: No connections were created in the fixed structure. Check connection probabilities.")
-
-        print(f"FIXED Network structure defined. Neurons: {total_neurons_global}, Connections: {chromosome_len_global}")
+        # --- Graph is populated inside create_snn_structure ---
+        print(f"Persistent SNN structure defined and graph populated. Neurons: {total_neurons_global}, Connections: {chromosome_len_global}")
 
     except Exception as e: print(f"Error creating base network structure: {e}. Exiting."); exit()
 
+    # --- Instantiate Stimulator (BEFORE precomputation) ---
+    print(f"Initializing SNN Stimulator in '{ENCODING_MODE}' mode...")
+    try:
+        # Determine device for potential CNN use
+        if torch.cuda.is_available(): device = torch.device("cuda")
+        elif torch.backends.mps.is_available(): device = torch.device("mps")
+        else: device = torch.device("cpu")
+        print(f"Using device for SNNStimulator (if needed): {device}")
+
+        mnist_stimulator_precompute = SNNStimulator(
+            total_time_ms=mnist_stim_duration_global,
+            max_freq_hz=max_freq_hz_global,
+            mode=ENCODING_MODE,
+            conv_weights_path=CONV_WEIGHTS_PATH,
+            device=device
+        )
+    except Exception as e:
+        print(f"Error initializing SNNStimulator for precomputation: {e}. Exiting.")
+        exit()
+
     # +++ START PRECOMPUTATION +++
     print("\n--- Precomputing MNIST Spike Trains ---")
-    precomputed_spike_trains_global = {} # Dictionary to store {index: spike_trains}
-    mnist_stimulator_precompute = SNNStimulator(
-        total_time_ms=mnist_stim_duration_global,
-        max_freq_hz=max_freq_hz_global
-    )
-    # Precompute for all filtered examples (both potential eval and test)
+    precomputed_spike_trains_global = {}
     indices_to_precompute = np.arange(num_filtered)
     precompute_start_time = time.time()
     for idx in tqdm(indices_to_precompute, desc="Precomputing Spikes", ncols=80):
         try:
             mnist_original_image = filtered_images_global[idx].reshape(28,28)
-            if downsample_factor_global > 1:
-                mnist_image = downsample_image(mnist_original_image, downsample_factor_global)
+
+            # Prepare the image *specifically* for the chosen encoding mode
+            if ENCODING_MODE == 'intensity_to_neuron':
+                # Downsample if needed for intensity mode input size (stimulator expects 0-255)
+                if DOWNSAMPLE_FACTOR_INTENSITY_MODE > 1:
+                    image_for_stimulator = downsample_image(mnist_original_image * 255.0, DOWNSAMPLE_FACTOR_INTENSITY_MODE)
+                else:
+                    image_for_stimulator = mnist_original_image * 255.0
+            elif ENCODING_MODE == 'conv_feature_to_neuron':
+                # Conv mode stimulator needs the original 28x28 (0-255)
+                image_for_stimulator = mnist_original_image * 255.0
             else:
-                mnist_image = mnist_original_image
-            # Generate and store
-            precomputed_spike_trains_global[idx] = mnist_stimulator_precompute.generate_spikes(mnist_image)
+                raise ValueError(f"Invalid ENCODING_MODE: {ENCODING_MODE}")
+
+            # Generate and store spikes
+            precomputed_spike_trains_global[idx] = mnist_stimulator_precompute.generate_spikes(image_for_stimulator)
+
         except Exception as e:
             print(f"\nWarning: Error precomputing spikes for index {idx}: {e}. Skipping.")
-            precomputed_spike_trains_global[idx] = None # Mark as failed
+            precomputed_spike_trains_global[idx] = None
 
     precompute_end_time = time.time()
     print(f"Finished precomputing {len(precomputed_spike_trains_global)} spike trains in {precompute_end_time - precompute_start_time:.2f}s.")
     # +++ END PRECOMPUTATION +++
 
     # --- Prepare Fixed Arguments Tuple for Parallel Fitness Function (MODIFIED) ---
-    # Add the precomputed spikes dictionary
+    # Pass the persistent network object and only necessary other args
+    print("Preparing fixed arguments for fitness function...")
     fitness_args_tuple_base = (
-        # Network Structure Params (FIXED)
-        total_neurons_global, neuron_config_global, layer_indices_global,
-        fixed_inhib_array_global, fixed_delays_matrix_global, connection_map_global,
-        N_CLASSES,
+        persistent_eval_network,       # <<< Pass the single network object (index 0)
+        connection_map_global,         # (index 1)
+        layer_indices_global,          # (index 2)
+        N_CLASSES,                     # (index 3)
         # Data Params
-        filtered_images_global, filtered_labels_global, label_map_global,
-        None, # Placeholder for p_eval_indices
-        precomputed_spike_trains_global, # *** ADDED PRECOMPUTED SPIKES ***
+        filtered_labels_global,        # (index 4)
+        label_map_global,              # (index 5)
+        None,                          # Placeholder for p_eval_indices (index 6)
+        precomputed_spike_trains_global,# (index 7)
         # Simulation Params
-        sim_duration_global, sim_dt_global, stim_config_global,
-        downsample_factor_global, mnist_stim_duration_global, max_freq_hz_global
+        sim_duration_global,           # (index 8)
+        sim_dt_global,                 # (index 9)
+        stim_config_global,            # (index 10)
+        mnist_stim_duration_global     # (index 11) - potentially needed by calculate_prediction
     )
-    # Update the index for eval_indices placeholder
-    EVAL_INDICES_ARG_INDEX = 10
-    PRECOMPUTED_SPIKES_ARG_INDEX = 11 # New index for the spikes dict
+    # Update the index for eval_indices placeholder accordingly
+    EVAL_INDICES_ARG_INDEX = 6
 
-    # --- Initialize Genetic Algorithm (Unchanged, uses correct chromosome length) ---
+    # --- Initialize Genetic Algorithm ---
     print("Initializing Genetic Algorithm...")
     try:
         ga = GeneticAlgorithm(
-            population_size=POPULATION_SIZE, chromosome_length=chromosome_len_global,
-            fitness_func=evaluate_chromosome_fitness, # Use the modified fitness func
-            fitness_func_args=fitness_args_tuple_base, # Pass the tuple with fixed structure info
+            population_size=POPULATION_SIZE,
+            chromosome_length=chromosome_len_global,
+            fitness_func=evaluate_chromosome_fitness, # Assumes updated fitness func exists
+            fitness_func_args=fitness_args_tuple_base, # Pass the modified tuple
             mutation_rate=MUTATION_RATE, mutation_strength=MUTATION_STRENGTH,
             crossover_rate=CROSSOVER_RATE, elitism_count=ELITISM_COUNT,
             tournament_size=TOURNAMENT_SIZE,
@@ -933,7 +948,7 @@ if __name__ == "__main__":
         print(f"GA Initialized: Pop={POPULATION_SIZE}, Gens={NUM_GENERATIONS}, Chromosome Length={chromosome_len_global}")
     except Exception as e: print(f"Error initializing GA: {e}. Exiting."); exit()
 
-    # --- Run Genetic Algorithm (Main loop unchanged) ---
+    # --- Run Genetic Algorithm ---
     best_fitness_history = []
     avg_fitness_history = []
     print(f"\n--- Starting GA Evolution for {NUM_GENERATIONS} Generations ({N_CORES} cores, FIXED Structure) ---")
@@ -947,8 +962,8 @@ if __name__ == "__main__":
             # Select subset of training examples for fitness evaluation this generation
             eval_indices_this_gen = np.random.choice(
                 train_eval_indices_pool,
-                min(FITNESS_EVAL_EXAMPLES, len(train_eval_indices_pool)), # Use min to handle small pools
-                replace=False # Sample without replacement
+                min(FITNESS_EVAL_EXAMPLES, len(train_eval_indices_pool)),
+                replace=False
             )
             # Update the evaluation indices in the arguments tuple
             current_fitness_args_list = list(ga.fitness_func_args)
@@ -956,14 +971,13 @@ if __name__ == "__main__":
             ga.fitness_func_args = tuple(current_fitness_args_list)
 
             # Evaluate population in parallel
-            ga.evaluate_population(n_cores=N_CORES, show_progress=True) # Control progress bar display
+            ga.evaluate_population(n_cores=N_CORES, show_progress=True)
 
-            # Process fitness scores (handle potential -inf)
+            # Process fitness scores
             if np.all(np.isneginf(ga.fitness_scores)):
                  best_gen_fitness = -np.inf; avg_gen_fitness = -np.inf
                  print(f"Generation {generation + 1} | All fitness evaluations failed!")
             else:
-                 # Use nanmax/nanmean to ignore -inf scores safely
                  valid_scores = np.where(np.isneginf(ga.fitness_scores), np.nan, ga.fitness_scores)
                  best_gen_fitness = np.nanmax(valid_scores) if np.any(np.isfinite(valid_scores)) else -np.inf
                  avg_gen_fitness = np.nanmean(valid_scores) if np.any(np.isfinite(valid_scores)) else -np.inf
@@ -977,24 +991,24 @@ if __name__ == "__main__":
             plot_filename = os.path.join(output_dir, f"ga_fitness_gen_{generation+1:03d}.png")
             plot_ga_progress(generation + 1, best_fitness_history, avg_fitness_history, final_test_accuracy, plot_filename, FITNESS_EVAL_EXAMPLES)
 
-            # Evolve to next generation (unless it's the last one)
+            # Evolve to next generation
             if generation < NUM_GENERATIONS - 1:
                  ga.run_generation()
 
     except KeyboardInterrupt: print("\nGA execution interrupted by user.")
-    except Exception as e: print(f"\nError during GA evolution: {e}") # import traceback; traceback.print_exc() # Uncomment for detailed traceback
+    except Exception as e: print(f"\nError during GA evolution: {e}")
 
     # --- End of GA Loop ---
     ga_end_time = time.time()
     print(f"\n--- GA Evolution Complete (or interrupted) ---")
-    print(f"Total GA time: {ga_end_time - start_overall_time:.2f}s")
+    print(f"Total GA time: {ga_end_time - start_overall_time:.2f}s") # Adjusted start time ref
 
    # --- Get Best Chromosome Found ---
     best_chromosome = None
     best_fitness_final = -np.inf
     if len(ga.fitness_scores) > 0 and np.any(np.isfinite(ga.fitness_scores)):
          valid_scores = np.where(np.isneginf(ga.fitness_scores), np.nan, ga.fitness_scores)
-         if np.any(np.isfinite(valid_scores)): # Check if there are any valid scores
+         if np.any(np.isfinite(valid_scores)):
               final_best_idx = np.nanargmax(valid_scores)
               if final_best_idx < len(ga.population):
                   best_chromosome = ga.population[final_best_idx]
@@ -1003,54 +1017,48 @@ if __name__ == "__main__":
 
                   # --- SAVE ALL PERTINENT NETWORK INFORMATION ---
                   print(f"\n--- Saving Best Network State to Directory: {output_dir} ---")
-                  base_filename = f"best_snn_{N_CLASSES}class_fixed_structure_precomputed" # Updated filename
+                  base_filename = f"best_snn_{N_CLASSES}class_fixed_structure_precomputed"
                   weights_save_path = os.path.join(output_dir, f"{base_filename}_weights.npy")
                   map_save_path = os.path.join(output_dir, f"{base_filename}_connection_map.npy")
-                  delays_save_path = os.path.join(output_dir, f"{base_filename}_delays_matrix.npy") # Save full matrix
-                  inhib_save_path = os.path.join(output_dir, f"{base_filename}_inhibitory_array.npy") # Save full array
+                  delays_save_path = os.path.join(output_dir, f"{base_filename}_delays_matrix.npy")
+                  inhib_save_path = os.path.join(output_dir, f"{base_filename}_inhibitory_array.npy")
                   config_save_path = os.path.join(output_dir, f"{base_filename}_config.json")
-                  pos_save_path = os.path.join(output_dir, f"{base_filename}_positions.npy") # File path for positions
-                  # Optionally save precomputed spikes if needed for reloading later
-                  # spikes_save_path = os.path.join(output_dir, f"{base_filename}_precomputed_spikes.npy")
+                  pos_save_path = os.path.join(output_dir, f"{base_filename}_positions.npy")
 
                   try:
-                      # 1. Save Best Weights (Chromosome)
+                      # Save weights, map, delays, inhib status, positions
                       np.save(weights_save_path, best_chromosome)
                       print(f"Saved best weights vector to {weights_save_path}")
-
-                      # 2. Save Connection Map (List of tuples)
                       np.save(map_save_path, np.array(connection_map_global, dtype=object))
                       print(f"Saved connection map to {map_save_path}")
-
-                      # 3. Save the FIXED Delays Matrix
-                      np.save(delays_save_path, fixed_delays_matrix_global)
+                      # Use the actual persistent network object to get delays/inhib status if needed,
+                      # but saving the initially created ones is fine as they are fixed.
+                      np.save(delays_save_path, persistent_eval_network.delays) # Save delays from the object
                       print(f"Saved fixed delays matrix to {delays_save_path}")
-
-                      # 4. Save the FIXED Inhibitory Status Array
-                      np.save(inhib_save_path, fixed_inhib_array_global)
+                      np.save(inhib_save_path, persistent_eval_network.is_inhibitory) # Save inhib status from the object
                       print(f"Saved fixed inhibitory status array to {inhib_save_path}")
-
-                      # 5. Save the FIXED Positions Dictionary
                       if 'pos_global' in locals() and isinstance(pos_global, dict):
                            np.save(pos_save_path, pos_global)
                            print(f"Saved fixed positions dictionary to {pos_save_path}")
                       else:
-                           print("Error: 'pos_global' dictionary not found. Cannot save positions.")
+                           print("Warning: 'pos_global' dictionary not found or invalid. Cannot save positions.")
 
-                     # 6. Save Key Configuration Parameters
-                      base_delay_used = network_creation_args.get('base_transmission_delay', 1.0) if 'network_creation_args' in locals() else 1.0
+                     # Save Key Configuration Parameters (Includes dynamic input size)
+                      # --- MODIFICATION: Ensure correct values are saved ---
                       config_to_save = {
-                          "layers_config": layers_config_global,
+                          "encoding_mode_used": ENCODING_MODE,
+                          "layers_config": layers_config_global, # Should have correct input size now
+                          "input_neurons_used": input_neurons, # Save the determined input size
                           "inhibitory_fraction_used": inhib_frac_global,
                           "neuron_config": neuron_config_global,
                           "connection_probabilities_used": conn_probs_global,
-                          "base_transmission_delay_used": base_delay_used,
+                          "base_transmission_delay_used": network_creation_args['base_transmission_delay'], # Get from creation args
                           "simulation_dt": sim_dt_global,
                           "random_seed": master_seed,
                           "n_neurons_total": total_neurons_global,
                           "n_connections": chromosome_len_global,
                           "n_classes": N_CLASSES,
-                          "downsample_factor": downsample_factor_global,
+                          "downsample_factor_intensity_mode": DOWNSAMPLE_FACTOR_INTENSITY_MODE, # Save the relevant downsample factor
                           "mnist_stim_duration_ms": mnist_stim_duration_global,
                           "max_frequency_hz": max_freq_hz_global,
                       }
@@ -1058,13 +1066,8 @@ if __name__ == "__main__":
                           json.dump(config_to_save, f, indent=4)
                       print(f"Saved configuration parameters to {config_save_path}")
 
-                      # Optionally save precomputed spikes
-                      # np.save(spikes_save_path, precomputed_spike_trains_global)
-                      # print(f"Saved precomputed spike trains to {spikes_save_path}")
-
                   except Exception as e:
                       print(f"Error saving network state files: {e}")
-                  # --- END SAVING BLOCK ---
 
               else:
                   print("Warning: Best fitness index is out of bounds for population.")
@@ -1073,19 +1076,17 @@ if __name__ == "__main__":
     else:
          print("Warning: No valid fitness scores available. Cannot determine best chromosome.")
 
-
     overall_end_time = time.time()
     print(f"\nTotal script execution time: {overall_end_time - start_overall_time:.2f}s")
 
     # --- Plot Final GA Fitness History ---
     if best_fitness_history:
          print("\nPlotting final GA fitness history...")
-         final_plot_filename = os.path.join(output_dir, f"mnist_snn_ga_fitness_plot_final_{N_CLASSES}class_precomputed.png") # Updated name
+         final_plot_filename = os.path.join(output_dir, f"mnist_snn_ga_fitness_plot_final_{N_CLASSES}class_precomputed.png")
          plot_ga_progress(len(best_fitness_history), best_fitness_history, avg_fitness_history, final_test_accuracy, final_plot_filename, FITNESS_EVAL_EXAMPLES)
          print(f"Saved final GA fitness plot to {final_plot_filename}")
 
     print("\n--- Script Finished ---")
-    # plt.close('all') # Optional: Close figures if running interactively
 
  
 
