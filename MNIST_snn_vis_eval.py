@@ -223,7 +223,11 @@ def run_vectorized_simulation(network: LayeredNeuronalNetworkVectorized,
     return activity_record
 
 def classify_output_total_sim(activity_record, output_layer_indices, n_classes):
-    """Classifies based on TOTAL spike counts in the output layer during the sim."""
+    """
+    Classifies based on TOTAL spike counts in the output layer during the sim.
+    MODIFIED: In case of a tie, selects the neuron with the lowest index
+              among the tied neurons (similar to GA fitness evaluation).
+    """
     if not output_layer_indices:
          print("Warning: Output layer indices not provided for classification.")
          return -1, {}
@@ -243,16 +247,23 @@ def classify_output_total_sim(activity_record, output_layer_indices, n_classes):
 
     predicted_label = -1
     if total_output_spikes > 0:
-        # Find the neuron index with the maximum spikes
+        # Find the neuron index with the maximum spikes.
+        # If there's a tie, max() with a key returns the *first* key
+        # encountered with the maximum value (typically the lowest index here).
         predicted_neuron_idx = max(output_spike_counts, key=output_spike_counts.get)
-        max_spikes = output_spike_counts[predicted_neuron_idx]
 
-        # Check for ties
-        tied_indices = [idx for idx, count in output_spike_counts.items() if count == max_spikes]
-        if len(tied_indices) > 1:
-            predicted_label = -1 # Ambiguous prediction on tie
-        else:
-            predicted_label = predicted_neuron_idx - output_start_idx # Convert index to label
+        # --- TIE CHECK REMOVED ---
+        # max_spikes = output_spike_counts[predicted_neuron_idx]
+        # tied_indices = [idx for idx, count in output_spike_counts.items() if count == max_spikes]
+        # if len(tied_indices) > 1:
+        #     predicted_label = -1 # Ambiguous prediction on tie -- REMOVED
+        # else:
+        #     predicted_label = predicted_neuron_idx - output_start_idx # Convert index to label -- KEPT & UNINDENTED
+        # --- END REMOVAL ---
+
+        # Directly assign the label based on the result of max()
+        predicted_label = predicted_neuron_idx - output_start_idx # Convert index to label
+
     # else: predicted_label remains -1 (no output spikes)
 
     return predicted_label, output_spike_counts
@@ -500,7 +511,7 @@ if __name__ == "__main__":
 
     # --- Configuration Loading ---
     # <<< ADJUST PATH TO THE *OUTPUT* CONFIG of the GA script >>>
-    CONFIG_FILE = "ga_mnist_snn_vectorized_precomputed_output/best_snn_5class_fixed_structure_precomputed_config.json"
+    CONFIG_FILE = "ga_mnist_snn_vectorized_precomputed_output/best_snn_3class_fixed_structure_precomputed_config.json"
     SAVED_STATE_DIR = os.path.dirname(CONFIG_FILE)
 
     if not os.path.exists(CONFIG_FILE): print(f"FATAL ERROR: Config file not found at {CONFIG_FILE}"); exit()
@@ -553,8 +564,8 @@ if __name__ == "__main__":
         # --- Configuration for this Eval/Vis script ---
         TOTAL_SIMULATION_DURATION_MS = 150
         STIM_CONFIG = {'strength': 25.0, 'pulse_duration_ms': SIM_DT}
-        ANIMATE_ACTIVITY = False # Set to True to generate activity GIF
-        EVALUATION_SAMPLES = 1000 # Number of test samples to evaluate
+        ANIMATE_ACTIVITY = True # Set to True to generate activity GIF
+        EVALUATION_SAMPLES = 3000 # Number of test samples to evaluate
         VIS_OUTPUT_DIR = "evaluation_and_visualization_output"
         if not os.path.exists(VIS_OUTPUT_DIR): os.makedirs(VIS_OUTPUT_DIR)
 
@@ -721,6 +732,7 @@ if __name__ == "__main__":
                  correct_valid_predictions = sum(1 for i, p in enumerate(predictions) if p != -1 and p == true_labels[i])
                  overall_accuracy = correct_valid_predictions / num_valid_predictions
                  print(f"Overall Accuracy (on {num_valid_predictions} valid predictions): {overall_accuracy:.4f}")
+                 print("Percentage of valid predictions:", num_valid_predictions / actual_eval_samples * 100.0)
 
                  try:
                      kappa_score = cohen_kappa_score(true_labels_valid, predictions_valid, labels=TARGET_CLASSES_FROM_CONFIG)

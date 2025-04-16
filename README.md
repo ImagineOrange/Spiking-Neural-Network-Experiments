@@ -2,7 +2,7 @@
 
 ![vis_digit_0_example_structure copy](https://github.com/user-attachments/assets/13f5652c-879f-44b9-b498-9c60fdffd87c)
 
-The aim of this repo is to develop my understanding on biologically plausible distributed networks. These neuron models are very different from the types found in artificial neural networks (ANNs) used in deep learning. They are called **Leaky-Integrate and Fire (LIF)** models. They compute over time, and are capable of integrating signals from many synaptic connections. LIF neurons model their own membrane potentials, and fire action potentials.
+The aim of this repo is to develop my understanding on biologically plausible distributed networks. These neuron models are very different from the types found in artificial neural networks (ANNs) used in deep learning. They are called **Leaky-Integrate and Fire (LIF)** models. They compute over time, and are capable of integrating signals from many synaptic connections. LIF neurons model their own membrane potentials, and fire action potentials. Also --- I am very excited to be able to visualize these networks. I have not seen activity in spiking networks visualized in this way before, and it's quite interesting to watch!
 
 Importantly, these specific LIF neurons are **conductance-based models**.
 When a presynaptic neuron fires, it doesn't directly inject current. Instead, it causes a temporary increase in the conductance of specific class of ion channels (abstracted) on the postsynaptic neuron's membrane.
