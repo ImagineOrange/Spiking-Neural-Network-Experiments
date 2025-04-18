@@ -11,20 +11,14 @@ from tqdm import tqdm # Progress bar
 import os # For creating directories
 import multiprocessing # For parallelization
 import json # For saving config
+import networkx as nx
 
 # --- Import custom modules ---
 # Assume these are available in the same directory or PYTHONPATH
 
 from LIF_objects.LayeredNeuronalNetworkVectorized import LayeredNeuronalNetworkVectorized
-from LIF_objects.Layered_LIFNeuronWithReversal import Layered_LIFNeuronWithReversal # Keep for param inspection
 from MNIST_utils.MNIST_stimulation_encodings import MNIST_loader,SNNStimulator, downsample_image
 
-
-import numpy as np
-import random
-import networkx as nx
-# Assuming LayeredNeuronalNetworkVectorized class is defined elsewhere
-# from your_module import LayeredNeuronalNetworkVectorized
 
 # --- Structure Creation Function (Only called ONCE now) ---
 def create_snn_structure(n_layers_list, inhibitory_fraction, connection_probs,
@@ -44,7 +38,6 @@ def create_snn_structure(n_layers_list, inhibitory_fraction, connection_probs,
         random.seed(random_seed)
 
     num_layers = len(n_layers_list)
-    original_total_neurons = sum(n_layers_list) # Store original if needed
 
     # Ensure last layer size matches required classes
     original_last_layer_size = n_layers_list[-1]
@@ -174,13 +167,13 @@ def create_snn_structure(n_layers_list, inhibitory_fraction, connection_probs,
                 connection_map.append((i, j)) # Record that this connection exists
                 connection_count += 1
 
-    # --- <<< MODIFIED: ADD HARDCODED MUTUAL INHIBITION BETWEEN ALL OUTPUT NEURONS >>> ---
+    #ADD HARDCODED MUTUAL INHIBITION BETWEEN ALL OUTPUT NEURONS
     manual_connections_added = 0
-    hardcoded_inhib_weight = -2.5 # Static inhibitory weight (negative)
+    hardcoded_inhib_weight = -5    # Static inhibitory weight (negative)
     hardcoded_delay = min_delay    # Static delay (use minimum physiological delay)
 
     if output_layer_size >= 2:
-        # --- MODIFICATION START ---
+
         print(f"Structure Creation Info: Adding/updating hardcoded mutual inhibition between ALL distinct pairs of output neurons ({output_layer_start_idx} to {output_layer_end_idx-1}).")
 
         # Iterate through all distinct pairs of neurons in the output layer
@@ -200,7 +193,7 @@ def create_snn_structure(n_layers_list, inhibitory_fraction, connection_probs,
                     print(f"Warning: Output neuron {j} not found in positions, skipping inhibitory connection from {i} to {j}.")
                     continue
 
-                # Add/Update inhibitory connection i -> j
+                # Add/Update inhibitory connection i -> j for learning purposes - Genetic Algorithm
                 connection_exists = (i, j) in connection_map # Check if it was added probabilistically
                 network.add_connection(i, j, weight=hardcoded_inhib_weight, delay=hardcoded_delay)
                 manual_connections_added += 1 # Count each directed connection added/updated
@@ -213,51 +206,6 @@ def create_snn_structure(n_layers_list, inhibitory_fraction, connection_probs,
                     # If it existed (e.g., from inh_recurrent), add_connection already updated its weight/delay
                     # print(f"  - Updated existing connection: ({i}->{j})") # Optional debug print
 
-        # --- MODIFICATION END ---
-    '''
-    # --- <<< ADD HARDCODED MUTUAL INHIBITION BETWEEN FIRST & LAST OUTPUT NEURONS >>> ---
-    manual_connections_added = 0
-    hardcoded_inhib_weight = -2.5 # Static inhibitory weight (negative)
-    hardcoded_delay = min_delay    # Static delay (use minimum physiological delay)
-
-    if output_layer_size >= 2:
-        # Indices were defined after the layer creation loop
-        idx1 = output_layer_start_idx
-        idx2 = output_layer_end_idx - 1 # Index of the last neuron in the layer
-
-        # Check if neurons actually exist in pos dict (safety check)
-        if idx1 in pos and idx2 in pos:
-            print(f"Structure Creation Info: Adding hardcoded mutual inhibition between output neurons {idx1} and {idx2}.")
-
-            # Add connection idx1 -> idx2 (using negative weight directly)
-            network.add_connection(idx1, idx2, weight=hardcoded_inhib_weight, delay=hardcoded_delay)
-            if (idx1, idx2) not in connection_map: # Add to map if not already present
-                connection_map.append((idx1, idx2))
-                manual_connections_added += 1
-            else: # If connection existed (e.g., probabilistic inh_recurrent), update properties
-                 network.graph[idx1][idx2]['weight'] = hardcoded_inhib_weight
-                 network.graph[idx1][idx2]['delay'] = hardcoded_delay
-                 print(f"  - Note: Connection ({idx1}->{idx2}) existed, properties updated.")
-
-            # Add connection idx2 -> idx1 (using negative weight directly)
-            network.add_connection(idx2, idx1, weight=hardcoded_inhib_weight, delay=hardcoded_delay)
-            if (idx2, idx1) not in connection_map: # Add to map if not already present
-                connection_map.append((idx2, idx1))
-                manual_connections_added += 1
-            else: # If connection existed, update properties
-                 network.graph[idx2][idx1]['weight'] = hardcoded_inhib_weight
-                 network.graph[idx2][idx1]['delay'] = hardcoded_delay
-                 print(f"  - Note: Connection ({idx2}->{idx1}) existed, properties updated.")
-        else:
-             # This case should ideally not be reached if indices are correct
-             print(f"Warning: Could not find positions for hardcoded neurons {idx1} or {idx2}.")
-
-    elif output_layer_size == 1:
-        print("Structure Creation Info: Output layer has only 1 neuron, skipping hardcoded mutual inhibition.")
-    # No need for else block if output_layer_size cannot be 0
-
-    # --- <<< END HARDCODED MUTUAL INHIBITION >>> ---
-    '''
 
     # Final status print, including manual connections if added
     print(f"Fixed SNN Structure Created: {total_neurons} neurons.")
@@ -285,11 +233,11 @@ def Layered_run_unified_simulation(network: LayeredNeuronalNetworkVectorized, # 
     NOTE: Detailed neuron data tracking (neuron_data) is DISABLED for vectorized network.
     """
     mnist_spikes_by_step = {}
+    # Pre-process MNIST spike times if provided
     if mnist_input_spikes is not None:
-        no_stimulation = True
+        no_stimulation = True # MNIST input overrides other stimulation
         stochastic_stim = False
         stim_interval = None
-        num_input_neurons = len(mnist_input_spikes)
         for neuron_idx, spike_list_ms in enumerate(mnist_input_spikes):
             for time_ms in spike_list_ms:
                 step_index = int(round(time_ms / dt))
@@ -298,28 +246,34 @@ def Layered_run_unified_simulation(network: LayeredNeuronalNetworkVectorized, # 
                         mnist_spikes_by_step[step_index] = []
                     mnist_spikes_by_step[step_index].append(neuron_idx)
 
+    # Initialize simulation variables
     n_steps = int(duration / dt)
     activity_record = []
     stimulation_record = {'pulse_starts': [], 'neurons': [], 'pulse_duration_ms': stim_pulse_duration_ms, 'times': []}
     neuron_data = {} # Detailed tracking disabled
 
-    ongoing_stimulations = {}
+    # Initialize stimulation state
+    ongoing_stimulations = {} # {neuron_idx: end_time_ms}
     stim_interval_steps = int(stim_interval / dt) if stim_interval is not None else None
     stimulation_population = set(stim_target_indices) if stim_target_indices is not None else set(range(network.n_neurons))
     if not stimulation_population: no_stimulation = True
 
+    # Setup progress bar (optional)
     sim_loop_iterator = range(n_steps)
     if show_progress:
          sim_loop_iterator = tqdm(range(n_steps), desc="Sim Step", leave=False, ncols=80)
 
+    # Array to hold external stimulation conductances for the current step
     current_stim_conductances = np.zeros(network.n_neurons)
 
+    # --- Main Simulation Loop ---
     for step in sim_loop_iterator:
         current_time = step * dt
-        current_stim_conductances.fill(0.0)
+        current_stim_conductances.fill(0.0) # Reset conductances each step
 
         newly_stimulated_indices_this_step = set()
 
+        # Apply MNIST Input Stimulation (if provided)
         if mnist_input_spikes is not None:
             if step in mnist_spikes_by_step:
                 neurons_spiking_now = mnist_spikes_by_step[step]
@@ -330,6 +284,7 @@ def Layered_run_unified_simulation(network: LayeredNeuronalNetworkVectorized, # 
                              ongoing_stimulations[neuron_idx] = stim_end_time
                              newly_stimulated_indices_this_step.add(neuron_idx)
                         current_stim_conductances[neuron_idx] = stim_interval_strength
+        # Apply Periodic/Stochastic Stimulation (if not using MNIST input)
         elif not no_stimulation and stimulation_population:
             num_to_stimulate = max(1, int(len(stimulation_population) * stim_fraction))
             apply_new_stim_pulse = False
@@ -345,31 +300,33 @@ def Layered_run_unified_simulation(network: LayeredNeuronalNetworkVectorized, # 
                          newly_stimulated_indices_this_step.add(idx)
                      current_stim_conductances[idx] = stim_interval_strength
 
+        # Manage Ongoing Stimulation Pulses (turn off expired ones, maintain active ones)
         expired_stims = set()
-        for neuron_idx, end_time in ongoing_stimulations.items():
+        for neuron_idx, end_time in list(ongoing_stimulations.items()): # Iterate over copy
             if current_time >= end_time:
                 expired_stims.add(neuron_idx)
-                current_stim_conductances[neuron_idx] = 0.0
+                current_stim_conductances[neuron_idx] = 0.0 # Ensure conductance is zero if expired
             else:
-                 if 0 <= neuron_idx < network.n_neurons:
-                      if neuron_idx not in newly_stimulated_indices_this_step:
-                           current_stim_conductances[neuron_idx] = stim_interval_strength
+                 # Maintain conductance for active, non-newly stimulated pulses
+                 if 0 <= neuron_idx < network.n_neurons and neuron_idx not in newly_stimulated_indices_this_step:
+                      current_stim_conductances[neuron_idx] = stim_interval_strength
 
+        # Remove expired stimulations from tracking
         for neuron_idx in expired_stims:
             if neuron_idx in ongoing_stimulations:
                  del ongoing_stimulations[neuron_idx]
 
-        # --- Set External Stimulus on Network Object ---
-        # This assumes network.external_stim_g is the array holding external conductances
+        # Apply calculated external stimulus conductances to the network object
         network.external_stim_g[:] = current_stim_conductances
 
-        # --- Update Network State (Vectorized) ---
-        active_indices = network.update_network(dt) # Returns NumPy array
-        activity_record.append(active_indices) # Store indices
+        # Update Network State using its internal vectorized method
+        active_indices = network.update_network(dt) # Returns NumPy array of spiking neuron indices
+        activity_record.append(active_indices) # Store the indices
 
     # --- Cleanup After Loop ---
-    network.external_stim_g.fill(0.0)
+    network.external_stim_g.fill(0.0) # Ensure all stimuli are off
 
+    # Close progress bar if used
     if show_progress and isinstance(sim_loop_iterator, tqdm):
          sim_loop_iterator.close()
 
@@ -500,8 +457,7 @@ class GeneticAlgorithm:
              # raise e # Optional: re-raise to stop execution
          finally:
              if pool: pool.close(); pool.join()
-         # eval_time = time.time() - start_eval_time # Verbose
-         # print(f"Eval finished: {eval_time:.2f}s") # Verbose
+
 
     def _tournament_selection(self):
         best_idx = -1; best_fitness = -np.inf
@@ -583,103 +539,125 @@ class GeneticAlgorithm:
 
 
 
-# --- MODIFIED Fitness Function with Correct Formatting ---
+import numpy as np
+# Make sure other necessary imports like run_snn_simulation, calculate_prediction
+# are available in the scope where this function is defined in MNIST_GA_experiment.py
+
+# --- Fitness Function (Optimized Balanced Accuracy using NumPy) ---
 def evaluate_chromosome_fitness(chromosome_weights,    # Current weights
-                                p_eval_network,       # <<< The persistent network object passed in
-                                p_connection_map,     # Needed for set_weights_sparse
-                                p_layer_indices,      # Needed for calculate_prediction
-                                p_n_classes,          # Needed for calculate_prediction
-                                # Data Params
-                                p_filtered_labels, p_label_map,
-                                p_eval_indices,
-                                p_precomputed_spikes, # <<< This dictionary holds the precomputed spikes
-                                # Simulation Params
+                                p_eval_network,       # The persistent network object
+                                p_connection_map,     # Map for setting weights
+                                p_layer_indices,      # Layer definitions
+                                p_n_classes,          # Number of target classes
+                                # Data Parameters
+                                p_filtered_labels,    # All labels for the filtered dataset
+                                p_label_map,          # Map from original label to 0..N_CLASSES-1
+                                p_eval_indices,       # Indices for the current evaluation batch
+                                p_precomputed_spikes, # Dict of precomputed spike trains
+                                # Simulation Parameters
                                 p_sim_duration, p_dt, p_stim_config,
-                                p_mnist_stim_duration # Potentially needed by calculate_prediction
+                                p_mnist_stim_duration # Duration of MNIST stimulus presentation
                                ):
     """
-    Fitness function using a persistent network object and precomputed spikes.
+    Fitness function using a persistent network, precomputed spikes, and
+    calculates Balanced Accuracy using NumPy for efficiency.
     """
     try:
-        # 1. Reset the persistent network's state variables
-        # Clears voltage, conductances, etc. from the previous evaluation run
+        # 1. Reset network state
         p_eval_network.reset_all()
-
-        # 2. Set the new weights for this chromosome ON THE PERSISTENT network
-        # Uses the connection map to apply weights from the chromosome vector
+        # 2. Set current chromosome's weights
         p_eval_network.set_weights_sparse(chromosome_weights, p_connection_map)
-
-        # --- Network Instantiation and Graph Population REMOVED ---
-        # These steps are no longer needed as the network object is created once outside
-
     except Exception as e:
         # print(f"Worker Error setting up network: {e}") # Optional debug
-        # Return lowest possible fitness if setup fails
-        return -np.inf
+        return -np.inf # Return lowest fitness on setup error
 
-    # --- Run simulation on the specified subset of filtered data ---
-    accuracies = []
+    # --- Prepare for evaluation ---
+    # Use lists initially, convert to arrays later if needed
+    true_labels_list = []
+    predicted_labels_list = []
 
     # Validate evaluation indices
     if not hasattr(p_eval_indices, '__len__') or len(p_eval_indices) == 0:
-         return 0.0
-    if len(p_filtered_labels) == 0:
-         return 0.0
+        return 0.0 # Return 0 fitness if no indices provided
+    # Filter indices to ensure they are valid for p_filtered_labels
     valid_eval_indices = [idx for idx in p_eval_indices if 0 <= idx < len(p_filtered_labels)]
     if not valid_eval_indices:
-         return 0.0
+        return 0.0 # Return 0 fitness if no *valid* indices
 
-    # Loop through the assigned evaluation examples for this chromosome
+    # --- Run simulation for each example in the evaluation batch ---
     for idx in valid_eval_indices:
         try:
-            # Get true label (no change needed)
+            # Get true label (mapped to 0..N_CLASSES-1)
             true_original_label = p_filtered_labels[idx]
-            if true_original_label not in p_label_map:
-                 continue
+            if true_original_label not in p_label_map: continue # Skip if not a target class
             true_mapped_label = p_label_map[true_original_label]
 
-            # --- Get PRECOMPUTED spikes --- <<< CHANGED >>>
-            # Retrieve spikes from the dictionary passed as an argument
+            # Retrieve precomputed spikes
             mnist_spike_times = p_precomputed_spikes.get(idx, None)
-            if mnist_spike_times is None:
-                # If precomputation failed for this index, skip this example
-                # print(f"Worker Warning: Precomputed spikes missing for index {idx}. Skipping.") # Optional debug
-                continue
-            # --- End Retrieval ---
+            if mnist_spike_times is None: continue # Skip if precomputation failed
 
-            # Run simulation using the persistent, updated network & retrieved spikes
+            # Run the SNN simulation
             activity_record = run_snn_simulation(
-                p_eval_network, # Use the persistent network object
+                p_eval_network,
                 duration=p_sim_duration,
                 dt=p_dt,
-                mnist_input_spikes=mnist_spike_times, # Use the retrieved spikes
+                mnist_input_spikes=mnist_spike_times,
                 stimulation_params=p_stim_config
             )
 
-            # Get prediction (no change needed)
-            predicted_label, output_counts = calculate_prediction(
+            # Get the prediction
+            predicted_label, _ = calculate_prediction( # Ignore output counts here
                 activity_record, p_layer_indices, dt=p_dt,
-                stim_duration_ms=p_mnist_stim_duration, # Pass this along
+                stim_duration_ms=p_mnist_stim_duration,
                 n_classes=p_n_classes
             )
 
-            # Calculate accuracy (no change needed)
+            # Store results ONLY if prediction is valid (not -1)
             if predicted_label != -1:
-                 is_correct = (predicted_label == true_mapped_label)
-                 accuracies.append(1 if is_correct else 0)
+                 true_labels_list.append(true_mapped_label)
+                 predicted_labels_list.append(predicted_label)
 
         except Exception as e:
             # print(f"Worker Error during sim/pred for index {idx}: {e}") # Optional debug
-            # Skip this example if an error occurs during simulation or prediction
-            continue
+            continue # Skip example on error
 
-    # --- Return average accuracy as fitness --- (no change needed)
-    fitness = np.mean(accuracies) if accuracies else 0.0
-    # Ensure fitness is not NaN (can happen if all examples resulted in errors or no predictions)
-    if np.isnan(fitness):
-        fitness = 0.0
+    # --- Calculate Balanced Accuracy using NumPy (Optimized) ---
+    if not true_labels_list: # No valid predictions were made
+        return 0.0
+
+    # Convert lists to numpy arrays for efficient computation
+    true_labels_arr = np.array(true_labels_list)
+    predicted_labels_arr = np.array(predicted_labels_list)
+
+    num_classes_eval = p_n_classes
+    class_recalls = np.zeros(num_classes_eval, dtype=float) # Pre-allocate array for recalls
+
+    # Iterate through each class index (0 to N_CLASSES-1)
+    for cls_label in range(num_classes_eval):
+        # Create a boolean mask for instances belonging to the current true class
+        true_mask = (true_labels_arr == cls_label)
+        # Count how many instances of this class were in the batch's valid results
+        num_true_cls = np.sum(true_mask)
+
+        if num_true_cls == 0:
+            # Handle case where class was not present/predicted in this batch
+            # Assign 0 recall if the class *could* have existed overall but wasn't predicted
+            possible_original_labels = [orig for orig, mapped in p_label_map.items() if mapped == cls_label]
+            is_class_possible_overall = any(orig_label in p_filtered_labels for orig_label in possible_original_labels)
+            class_recalls[cls_label] = 0.0 if is_class_possible_overall else 1.0 # Default to 1.0 if class genuinely absent from dataset
+        else:
+            # Count correct predictions for this class using the mask
+            correct_cls_count = np.sum(predicted_labels_arr[true_mask] == cls_label)
+            # Calculate recall and store it
+            class_recalls[cls_label] = correct_cls_count / num_true_cls
+
+    # Calculate balanced accuracy by averaging the per-class recalls
+    balanced_accuracy = np.mean(class_recalls)
+
+    # Ensure fitness is not NaN (can happen if class_recalls is all NaN, though unlikely here)
+    fitness = balanced_accuracy if not np.isnan(balanced_accuracy) else 0.0
+
     return fitness
-
 
 
 
@@ -692,13 +670,13 @@ def plot_ga_progress(generations, best_fitness_history, avg_fitness_history, fin
     best_plot = [f if np.isfinite(f) else np.nan for f in best_fitness_history]
     avg_plot = [f if np.isfinite(f) else np.nan for f in avg_fitness_history]
 
-    ax_ga.plot(gen_axis, best_plot, marker='o', linestyle='-', color='cyan', markersize=4, label='Best Fitness (Eval Set)')
-    ax_ga.plot(gen_axis, avg_plot, marker='x', linestyle='--', color='orange', markersize=4, label='Average Fitness (Eval Set)')
+    ax_ga.plot(gen_axis, best_plot, marker='x', linestyle='--', color='blue', markersize=4, label='Best Fitness (Eval Set)')
+    ax_ga.plot(gen_axis, avg_plot, marker='x', linestyle='--', color='red', markersize=4, label='Average Fitness (Eval Set)')
     ax_ga.set_title(f'GA Fitness - Generation {generations}', color='white')
     ax_ga.set_xlabel('Generation', color='white')
     ax_ga.set_ylabel(f'Fitness (Accuracy on {fitness_eval_examples} Examples)')
     ax_ga.set_ylim(0, 1.05)
-    ax_ga.grid(True, alpha=0.3)
+    ax_ga.grid(True, alpha=0.2)
     ax_ga.legend(loc='lower right', framealpha=0.7)
     ax_ga.set_facecolor('#1a1a1a')
     ax_ga.tick_params(colors='white')
@@ -734,20 +712,20 @@ if __name__ == "__main__":
     start_overall_time = time.time()
 
     # --- Configuration ---
-    TARGET_CLASSES = [0,1,2] # Example: Classify digits 0, 1, 2
+    TARGET_CLASSES = [0,1,2,3,4] # Example: Classify digits 0, 1, 2
     N_CLASSES = len(TARGET_CLASSES)
     label_map_global = {original_label: new_index for new_index, original_label in enumerate(TARGET_CLASSES)}
     print(f"--- Running {N_CLASSES}-Class MNIST GA SNN (Vectorized - Fixed Structure, Precomputed Spikes) ---")
     print(f"Target Digits: {TARGET_CLASSES} -> Mapped Indices: {list(range(N_CLASSES))}")
 
     POPULATION_SIZE = 100
-    NUM_GENERATIONS = 20
+    NUM_GENERATIONS = 50
     MUTATION_RATE = 0.01
     MUTATION_STRENGTH = 0.01
     CROSSOVER_RATE = 0.7
     ELITISM_COUNT = 2
     TOURNAMENT_SIZE = 5
-    FITNESS_EVAL_EXAMPLES = 2000 # Number of examples per fitness evaluation
+    FITNESS_EVAL_EXAMPLES = 1000 # Number of examples per fitness evaluation
     N_CORES = max(1, os.cpu_count() - 1 if os.cpu_count() else 1) # Use almost all cores
     print(f"Using {N_CORES} cores for parallel evaluation.")
 
@@ -773,7 +751,7 @@ if __name__ == "__main__":
          raise ValueError(f"Invalid ENCODING_MODE: {ENCODING_MODE}")
 
     # Define layer config using the determined input size
-    layers_config_global = [input_neurons, 30, 20,  N_CLASSES] # Uses the correct input_neurons now
+    layers_config_global = [input_neurons, 80, 50,  N_CLASSES] # Uses the correct input_neurons now
 
     inhib_frac_global = 0.2
     conn_probs_global = { # Keep using probabilities for initial structure generation
@@ -1091,18 +1069,3 @@ if __name__ == "__main__":
  
 
 
-
-
-
-
-
-
-
-'''
-TOODOO
-#kappa score calculation and vis
-#precalculate delays                       XXX
-#precalculate input spieks in mnist        XXX
-#change connections to json 
-
-'''

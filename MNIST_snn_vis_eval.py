@@ -3,9 +3,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+from matplotlib.colors import Normalize
 import os
 import time
 import pandas as pd
+
 import random
 import json
 import traceback
@@ -22,6 +24,8 @@ plt.style.use('dark_background')
 # --- Required Custom Imports ---
 
 # LIF Objects (Need the specific network class used for evaluation)
+# kept these try blocks for debugging's sake... will likely remove later
+
 try:
     # Assuming evaluation uses the Vectorized version
     from LIF_objects.LayeredNeuronalNetworkVectorized import LayeredNeuronalNetworkVectorized
@@ -31,7 +35,6 @@ except ImportError:
     print("Could not import 'LayeredNeuronalNetworkVectorized' from 'LIF_objects'.")
     print("Please ensure this file exists and the class name is correct.")
     exit()
-
 
 try:
     # SNNStimulator now includes ConvNet definition needed if loading that mode
@@ -45,19 +48,10 @@ except ImportError:
     exit()
 
 # Visualization Utilities
-try:
-    from LIF_utils.network_vis_utils import Layered_plot_network_connections_sparse, Layered_visualize_activity_layout_grid
-    from LIF_utils.activity_vis_utils import Layered_plot_activity_and_layer_psth, Layered_plot_layer_wise_raster, Layered_visualize_distance_dependences
-    print("Imported visualization functions from LIF_utils.")
-except ImportError:
-    print("\n--- WARNING ---")
-    print("Could not import all visualization functions from 'LIF_utils'.")
-    print("Define dummy functions to avoid errors, but plots may fail.")
-    def Layered_plot_network_connections_sparse(*args, **kwargs): print("Dummy: Layered_plot_network_connections_sparse")
-    def Layered_visualize_activity_layout_grid(*args, **kwargs): print("Dummy: Layered_visualize_activity_layout_grid")
-    def Layered_plot_activity_and_layer_psth(*args, **kwargs): print("Dummy: Layered_plot_activity_and_layer_psth")
-    def Layered_plot_layer_wise_raster(*args, **kwargs): print("Dummy: Layered_plot_layer_wise_raster")
-    def Layered_visualize_distance_dependences(*args, **kwargs): print("Dummy: Layered_visualize_distance_dependences"); return None, None
+from LIF_utils.network_vis_utils import Layered_plot_network_connections_sparse, Layered_visualize_activity_layout_grid
+from LIF_utils.activity_vis_utils import Layered_plot_activity_and_layer_psth, Layered_plot_layer_wise_raster, Layered_visualize_distance_dependences
+print("Imported visualization functions from LIF_utils.")
+
 
 # --- Functions Implemented Directly (Keep definitions as provided previously) ---
 
@@ -163,6 +157,7 @@ def run_vectorized_simulation(network: LayeredNeuronalNetworkVectorized,
     Runs the network simulation using vectorized updates.
     Focuses on MNIST input, ignoring other stimulation types.
     """
+    # Pre-process MNIST spike times into step-based dictionary
     mnist_spikes_by_step = {}
     if mnist_input_spikes is not None:
         for neuron_idx, spike_list_ms in enumerate(mnist_input_spikes):
@@ -173,21 +168,26 @@ def run_vectorized_simulation(network: LayeredNeuronalNetworkVectorized,
                         mnist_spikes_by_step[step_index] = []
                     mnist_spikes_by_step[step_index].append(neuron_idx)
 
+    # Initialize simulation state
     n_steps = int(duration / dt)
     activity_record = []
-    ongoing_stimulations = {}
+    ongoing_stimulations = {} # {neuron_idx: end_time_ms}
 
+    # Setup optional progress bar
     sim_loop_iterator = range(n_steps)
     if show_progress:
          sim_loop_iterator = tqdm(range(n_steps), desc="Sim Step (Vis)", leave=False, ncols=80)
 
+    # Vectorized array for external stimulus conductances
     current_stim_conductances = np.zeros(network.n_neurons)
 
+    # --- Main Simulation Loop ---
     for step in sim_loop_iterator:
         current_time = step * dt
-        current_stim_conductances.fill(0.0)
+        current_stim_conductances.fill(0.0) # Reset conductances
         newly_stimulated_indices_this_step = set()
 
+        # Apply MNIST stimulation if spikes occur at this step
         if step in mnist_spikes_by_step:
             neurons_spiking_now = mnist_spikes_by_step[step]
             stim_end_time = current_time + stim_pulse_duration_ms
@@ -196,26 +196,29 @@ def run_vectorized_simulation(network: LayeredNeuronalNetworkVectorized,
                     if neuron_idx not in ongoing_stimulations:
                          ongoing_stimulations[neuron_idx] = stim_end_time
                          newly_stimulated_indices_this_step.add(neuron_idx)
-                    # Apply conductance regardless of ongoing status for simplicity here
+                    # Apply conductance (will be maintained/decayed below)
                     current_stim_conductances[neuron_idx] = stim_interval_strength
 
+        # Manage ongoing stimulation pulses (decay/end)
         expired_stims = set()
         for neuron_idx, end_time in list(ongoing_stimulations.items()): # Iterate over copy
             if current_time >= end_time:
                 expired_stims.add(neuron_idx)
-                if neuron_idx in ongoing_stimulations: # Check if not already deleted
+                if neuron_idx in ongoing_stimulations: # Check again before deleting
                     del ongoing_stimulations[neuron_idx]
-                # Ensure conductance is zero if expired this step
-                current_stim_conductances[neuron_idx] = 0.0
+                current_stim_conductances[neuron_idx] = 0.0 # Ensure conductance is off
             elif 0 <= neuron_idx < network.n_neurons: # If not expired
-                 # Apply conductance if pulse is still active and wasn't just started
+                 # Maintain conductance if pulse is active and wasn't just started
                  if neuron_idx not in newly_stimulated_indices_this_step:
                     current_stim_conductances[neuron_idx] = stim_interval_strength
 
+        # Set external stimulus conductances on the network object
         network.external_stim_g[:] = current_stim_conductances
+        # Update the network state and get spiking neurons
         active_indices = network.update_network(dt)
         activity_record.append(active_indices)
 
+    # Cleanup after loop
     network.external_stim_g.fill(0.0)
     if show_progress and isinstance(sim_loop_iterator, tqdm):
          sim_loop_iterator.close()
@@ -243,32 +246,19 @@ def classify_output_total_sim(activity_record, output_layer_indices, n_classes):
                 if output_start_idx <= neuron_idx < output_end_idx:
                     output_spike_counts[neuron_idx] += 1
                     total_output_spikes += 1
-        # else: print(f"Warning: Non-iterable item in activity_record: {step_spikes}") # Optional debug
 
     predicted_label = -1
     if total_output_spikes > 0:
         # Find the neuron index with the maximum spikes.
-        # If there's a tie, max() with a key returns the *first* key
+        # If there's a tie, max() with a key returns the *first* key --- network may learn to spike earlier to classify
         # encountered with the maximum value (typically the lowest index here).
         predicted_neuron_idx = max(output_spike_counts, key=output_spike_counts.get)
-
-        # --- TIE CHECK REMOVED ---
-        # max_spikes = output_spike_counts[predicted_neuron_idx]
-        # tied_indices = [idx for idx, count in output_spike_counts.items() if count == max_spikes]
-        # if len(tied_indices) > 1:
-        #     predicted_label = -1 # Ambiguous prediction on tie -- REMOVED
-        # else:
-        #     predicted_label = predicted_neuron_idx - output_start_idx # Convert index to label -- KEPT & UNINDENTED
-        # --- END REMOVAL ---
-
         # Directly assign the label based on the result of max()
         predicted_label = predicted_neuron_idx - output_start_idx # Convert index to label
 
-    # else: predicted_label remains -1 (no output spikes)
 
     return predicted_label, output_spike_counts
 
-# <<< NEW PLOTTING FUNCTION >>>
 def plot_mnist_input_with_feature_map(image, label, feature_map, spike_times_list, stim_duration_ms, save_path):
     """Creates a 4-panel figure: MNIST image, 7x7 feature map, input spike raster."""
     print(f"Generating MNIST input + feature map visualization...")
@@ -328,44 +318,101 @@ def plot_mnist_input_with_feature_map(image, label, feature_map, spike_times_lis
         print(f"Saved MNIST input details plot (with feature map) to {save_path}")
     except Exception as e: print(f"Error saving input plot {save_path}: {e}")
     plt.close(fig)
-# <<< END OF NEW PLOTTING FUNCTION >>>
+
 
 def plot_evaluation_results(accuracy, kappa_score, confusion_mat, class_labels, save_path):
-    """Creates plots for evaluation: overall accuracy, kappa, and confusion matrix."""
-    # (Keep implementation as provided previously)
-    fig = plt.figure(figsize=(10, 5), facecolor='#1a1a1a')
-    gs = gridspec.GridSpec(1, 2, width_ratios=[1, 1.5], wspace=0.3)
-    ax_acc = fig.add_subplot(gs[0, 0])
+    """
+    Creates a more elegant plot for evaluation: overall accuracy, kappa,
+    and a normalized confusion matrix.
+    """
+    # Ensure dark style is active (usually set globally)
+    plt.style.use('dark_background')
+
+    fig = plt.figure(figsize=(12, 6), facecolor='#1a1a1a') # Slightly wider figure
+    gs = gridspec.GridSpec(1, 2, width_ratios=[1, 1.2], wspace=0.4) # Adjust width ratio and spacing
+
+    # --- Panel 1: Metrics ---
+    ax_metrics = fig.add_subplot(gs[0, 0])
+    ax_metrics.set_facecolor('#1a1a1a') # Ensure background is dark
+    ax_metrics.axis('off') # Turn off axis lines and ticks
+
+    # Format metrics text
+    acc_text = f"Overall Accuracy: {accuracy:.2%}"
     kappa_text = f"Cohen's Kappa: {kappa_score:.4f}" if kappa_score is not None else "Cohen's Kappa: N/A"
-    acc_text = f"Overall Accuracy: {accuracy:.2%}\n{kappa_text}"
-    ax_acc.text(0.5, 0.5, acc_text, fontsize=16, color='lime', ha='center', va='center', bbox=dict(facecolor='black', alpha=0.5, boxstyle='round,pad=0.5'))
-    ax_acc.set_title("Evaluation Metrics", color='white')
-    ax_acc.axis('off')
+
+    # Display text directly on the axis - centered, larger font
+    ax_metrics.text(0.5, 0.6, acc_text, fontsize=18, color='limegreen', ha='center', va='center', weight='bold')
+    ax_metrics.text(0.5, 0.4, kappa_text, fontsize=14, color='silver', ha='center', va='center')
+
+    # --- Panel 2: Normalized Confusion Matrix ---
     ax_cm = fig.add_subplot(gs[0, 1])
+    ax_cm.set_facecolor('#1a1a1a') # Ensure background is dark
+
     if confusion_mat is not None and class_labels:
-        disp = ConfusionMatrixDisplay(confusion_matrix=confusion_mat, display_labels=class_labels)
-        disp.plot(ax=ax_cm, cmap='viridis', colorbar=True, text_kw={'color': 'black', 'ha': 'center', 'va': 'center'})
-        ax_cm.set_title("Confusion Matrix", color='white')
-        ax_cm.tick_params(axis='x', colors='white', rotation=45)
-        ax_cm.tick_params(axis='y', colors='white')
-        ax_cm.xaxis.label.set_color('white')
-        ax_cm.yaxis.label.set_color('white')
+        # Normalize the confusion matrix by the true label counts (rows)
+        # This shows recall rates (percentage correctly identified for each class)
+        cm_normalized = confusion_mat.astype('float') / confusion_mat.sum(axis=1)[:, np.newaxis]
+        # Handle potential NaN if a row sum is zero (no instances of that class)
+        cm_normalized = np.nan_to_num(cm_normalized)
+
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm_normalized, display_labels=class_labels)
+
+        # Plot using a sequential colormap ('Blues' or 'viridis') and format values as percentages
+        disp.plot(ax=ax_cm, cmap='viridis', colorbar=True, values_format=".1%") # Format as percentage
+
+        # --- Improve Text Readability ---
+        # Determine threshold for switching text color based on colormap range
+        norm = Normalize(vmin=cm_normalized.min(), vmax=cm_normalized.max())
+        threshold = norm.vmin + (norm.vmax - norm.vmin) / 2.0 # Midpoint of colormap range
+
+        # Iterate through matrix cells and set text color
+        for i in range(cm_normalized.shape[0]):
+            for j in range(cm_normalized.shape[1]):
+                ax_cm.texts[i * cm_normalized.shape[1] + j].set_color(
+                    'white' if cm_normalized[i, j] < threshold else 'black'
+                )
+        # --- End Text Readability Improvement ---
+
+        ax_cm.set_title("Normalized Confusion Matrix (Recall)", color='white', fontsize=14) # Updated title
+        ax_cm.tick_params(axis='x', colors='white', rotation=45, labelsize=10)
+        ax_cm.tick_params(axis='y', colors='white', labelsize=10)
+        ax_cm.xaxis.label.set_color('white'); ax_cm.xaxis.label.set_fontsize(12)
+        ax_cm.yaxis.label.set_color('white'); ax_cm.yaxis.label.set_fontsize(12)
+
+        # Style the color bar
         cbar = disp.im_.colorbar
         if cbar:
-            cbar.ax.yaxis.set_tick_params(color='white')
+            cbar.ax.yaxis.set_tick_params(color='white', labelsize=10)
             plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white')
-            cbar.set_label(cbar.ax.get_ylabel(), color='white')
+            cbar.set_label("Fraction of True Labels", color='white', fontsize=12) # Updated label for normalization
+
+        # Style the spines
+        for spine in ax_cm.spines.values():
+            spine.set_color('gray')
+
     else:
         ax_cm.text(0.5, 0.5, "Confusion Matrix\nNot Available", color='white', ha='center', va='center')
         ax_cm.axis('off')
-    plt.suptitle("Trained SNN Evaluation Results", fontsize=16, color='white', y=0.98)
-    try: plt.tight_layout(rect=[0, 0, 1, 0.95])
-    except ValueError as e: print(f"Warning: tight_layout issue: {e}")
+
+    # --- Overall Title and Layout ---
+    plt.suptitle("Trained SNN Evaluation Results", fontsize=18, color='white', weight='bold', y=0.97) # Larger main title
+    try:
+        # Use tight_layout first, then adjust subplot parameters if needed
+        plt.tight_layout(rect=[0, 0.03, 1, 0.93]) # Adjust rect to prevent overlap with suptitle
+    except ValueError as e:
+        print(f"Warning: tight_layout issue: {e}")
+        # Fallback adjustments if tight_layout fails
+        plt.subplots_adjust(top=0.90, bottom=0.1, left=0.1, right=0.9, wspace=0.4)
+
+
+    # --- Save Figure ---
     try:
         plt.savefig(save_path, dpi=150, facecolor='#1a1a1a', bbox_inches='tight')
-        print(f"Saved evaluation results plot to {save_path}")
-    except Exception as e: print(f"Error saving evaluation plot {save_path}: {e}")
-    plt.close(fig)
+        print(f"Saved updated evaluation results plot to {save_path}")
+    except Exception as e:
+        print(f"Error saving evaluation plot {save_path}: {e}")
+
+    plt.close(fig) # Close the figure
 
 def plot_weight_distribution_by_source(weights_vector, connection_map, inhibitory_status_array, save_path):
     """
@@ -510,13 +557,14 @@ if __name__ == "__main__":
     start_overall_time = time.time()
 
     # --- Configuration Loading ---
-    # <<< ADJUST PATH TO THE *OUTPUT* CONFIG of the GA script >>>
-    CONFIG_FILE = "ga_mnist_snn_vectorized_precomputed_output/best_snn_3class_fixed_structure_precomputed_config.json"
+    CONFIG_FILE = "ga_mnist_snn_vectorized_precomputed_output/best_snn_5class_fixed_structure_precomputed_config.json"
     SAVED_STATE_DIR = os.path.dirname(CONFIG_FILE)
 
+    # keep these for debugging purposes
     if not os.path.exists(CONFIG_FILE): print(f"FATAL ERROR: Config file not found at {CONFIG_FILE}"); exit()
     if not os.path.isdir(SAVED_STATE_DIR): print(f"FATAL ERROR: Saved state directory not found at {SAVED_STATE_DIR}"); exit()
 
+    # load block
     try:
         print(f"Loading configuration from: {CONFIG_FILE}")
         with open(CONFIG_FILE, 'r') as f: config = json.load(f)
@@ -526,7 +574,7 @@ if __name__ == "__main__":
         # Use the specific downsample factor saved for intensity mode, if available
         DOWNSAMPLE_FACTOR_INTENSITY = config.get("downsample_factor_intensity_mode", config.get("downsample_factor"))
         CONV_FEATURE_COUNT = 49 # Expected feature count
-        # <<< IMPORTANT: UPDATE THIS PATH TO YOUR ACTUAL CONVNET WEIGHTS >>>
+        # adjust this line for convnet path weights
         CONV_WEIGHTS_PATH = '/Users/ethancrouse/Desktop/Spiking-Neural-Network-Experiments/MNIST_utils/conv_model_weights/conv_model_weights.pth' # Path to CNN weights
 
         if LOADED_ENCODING_MODE not in ['intensity_to_neuron', 'conv_feature_to_neuron']:

@@ -14,7 +14,7 @@ The networks in this repo are sparsely connected, and have modifiable topologies
 
 **This project has several goals:**
 
-1. **Build LIF neurons** and document their behavior (Achieved -- figures found in functional_diagnostic directory).
+1. **Build LIF neurons** and document their behavior (Achieved -- figures found in functional_diagnostic directory)
 
 2. **Build networks** and record their activity in a variety of activity regimes (sub-critical, **critical**, super critical), with activity that can propagate through layers without dying off (Achieved -- figures can be found in experiment_layered directory)
 
