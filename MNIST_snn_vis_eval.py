@@ -17,6 +17,7 @@ from collections import deque, Counter # Added Counter for confusion matrix
 from tqdm import tqdm
 # Added cohen_kappa_score
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, cohen_kappa_score
+from MNIST_utils.MNIST_stimulation_encodings import downsample_image
 
 # --- Style ---
 plt.style.use('dark_background')
@@ -557,7 +558,7 @@ if __name__ == "__main__":
     start_overall_time = time.time()
 
     # --- Configuration Loading ---
-    CONFIG_FILE = "ga_mnist_snn_vectorized_precomputed_output/best_snn_5class_fixed_structure_precomputed_config.json"
+    CONFIG_FILE = "ga_mnist_snn_vectorized_precomputed_output/best_snn_2class_fixed_structure_precomputed_config.json"
     SAVED_STATE_DIR = os.path.dirname(CONFIG_FILE)
 
     # keep these for debugging purposes
@@ -714,7 +715,7 @@ if __name__ == "__main__":
                 # Pass 0-255 range image to stimulator's generate_spikes
                 if LOADED_ENCODING_MODE == 'intensity_to_neuron':
                     if DOWNSAMPLE_FACTOR_INTENSITY > 1:
-                        image_for_stimulator = downscale_image(mnist_original_image_0_1 * 255.0, DOWNSAMPLE_FACTOR_INTENSITY)
+                        image_for_stimulator = downsample_image(mnist_original_image_0_1 * 255.0, DOWNSAMPLE_FACTOR_INTENSITY)
                     else:
                         image_for_stimulator = mnist_original_image_0_1 * 255.0
                 elif LOADED_ENCODING_MODE == 'conv_feature_to_neuron':
@@ -832,7 +833,7 @@ if __name__ == "__main__":
             # Prepare image for the stimulator (pass 0-255)
             if LOADED_ENCODING_MODE == 'intensity_to_neuron':
                 if DOWNSAMPLE_FACTOR_INTENSITY > 1:
-                    image_for_stimulator_vis = downscale_image(vis_image_orig_0_1 * 255.0, DOWNSAMPLE_FACTOR_INTENSITY)
+                    image_for_stimulator_vis = downsample_image(vis_image_orig_0_1 * 255.0, DOWNSAMPLE_FACTOR_INTENSITY)
                 else:
                     image_for_stimulator_vis = vis_image_orig_0_1 * 255.0
             

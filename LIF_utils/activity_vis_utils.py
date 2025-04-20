@@ -550,7 +550,6 @@ def Layered_plot_layer_wise_raster(network, activity_record, layer_indices, dt=0
         stim_times (list, optional): List of stimulation pulse start times (ms) to mark on plots.
         save_path (str): Path to save the output plot.
     """
-    print(f"Generating layer-wise raster plot...")
     num_layers = len(layer_indices)
     total_steps = len(activity_record)
     if total_steps == 0:
@@ -640,7 +639,7 @@ def Layered_plot_layer_wise_raster(network, activity_record, layer_indices, dt=0
     # Save the figure
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        print(f"Saved layer-wise raster plot to {save_path}")
+        plt.close()
     return fig
 
 

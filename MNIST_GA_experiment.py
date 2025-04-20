@@ -11,7 +11,7 @@ from tqdm import tqdm # Progress bar
 import os # For creating directories
 import multiprocessing # For parallelization
 import json # For saving config
-import networkx as nx
+
 
 # --- Import custom modules ---
 # Assume these are available in the same directory or PYTHONPATH
@@ -169,7 +169,7 @@ def create_snn_structure(n_layers_list, inhibitory_fraction, connection_probs,
 
     #ADD HARDCODED MUTUAL INHIBITION BETWEEN ALL OUTPUT NEURONS
     manual_connections_added = 0
-    hardcoded_inhib_weight = -5    # Static inhibitory weight (negative)
+    hardcoded_inhib_weight = -.05    # Static inhibitory weight (negative)
     hardcoded_delay = min_delay    # Static delay (use minimum physiological delay)
 
     if output_layer_size >= 2:
@@ -719,7 +719,7 @@ if __name__ == "__main__":
     print(f"Target Digits: {TARGET_CLASSES} -> Mapped Indices: {list(range(N_CLASSES))}")
 
     POPULATION_SIZE = 100
-    NUM_GENERATIONS = 50
+    NUM_GENERATIONS = 100
     MUTATION_RATE = 0.01
     MUTATION_STRENGTH = 0.01
     CROSSOVER_RATE = 0.7
@@ -738,7 +738,7 @@ if __name__ == "__main__":
     mnist_stim_duration_global = 50  # ms
     max_freq_hz_global = 200.0       # Hz
     sim_duration_global = 90         # ms
-    sim_dt_global = 0.1              # ms
+    sim_dt_global = .1                # ms
 
     # --- MODIFICATION: Determine SNN input layer size based on mode ---
     if ENCODING_MODE == 'intensity_to_neuron':
@@ -751,7 +751,7 @@ if __name__ == "__main__":
          raise ValueError(f"Invalid ENCODING_MODE: {ENCODING_MODE}")
 
     # Define layer config using the determined input size
-    layers_config_global = [input_neurons, 80, 50,  N_CLASSES] # Uses the correct input_neurons now
+    layers_config_global = [input_neurons, 80, N_CLASSES] # Uses the correct input_neurons now
 
     inhib_frac_global = 0.2
     conn_probs_global = { # Keep using probabilities for initial structure generation
