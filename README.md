@@ -1,4 +1,4 @@
-# Neuronal Modeling and Circuit Dynamics
+# Spiking Neural Networks as Statistical Machines
 
 ![vis_digit_0_example_structure copy](https://github.com/user-attachments/assets/13f5652c-879f-44b9-b498-9c60fdffd87c)
 
