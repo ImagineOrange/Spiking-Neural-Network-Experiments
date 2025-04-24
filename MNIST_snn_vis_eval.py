@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.colors import Normalize
+from matplotlib.colors import LogNorm # For better color mapping of probabilities
 import os
 import time
 import pandas as pd
@@ -18,6 +19,7 @@ from tqdm import tqdm
 # Added cohen_kappa_score
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, cohen_kappa_score
 from MNIST_utils.MNIST_stimulation_encodings import downsample_image
+
 
 # --- Style ---
 plt.style.use('dark_background')
@@ -553,12 +555,197 @@ def plot_weight_distribution_by_source(weights_vector, connection_map, inhibitor
     plt.close(fig) # Close the figure to free memory
 
 
+def plot_activity_summary_and_heatmap(activity_record, n_neurons, dt, total_duration_ms,
+                                      pos, grid_resolution, save_path_prefix,
+                                      smoothing_window_ms=5.0): # <-- Smoothing parameter
+    """
+    Generates two plots related to network activity sparsity:
+    1. A plot showing a SMOOTHED activation percentage over time
+       (with raw data faint in background). The smoothed line is RED.
+    2. A separate heatmap showing the firing probability of each neuron mapped
+       onto a spatial grid.
+
+    Args:
+        activity_record (list): List of spiking neuron indices per time step.
+        n_neurons (int): Total number of neurons in the network.
+        dt (float): Simulation time step (ms).
+        total_duration_ms (float): The total duration of the simulation run (ms).
+        pos (dict): Dictionary mapping neuron indices to (x, y) positions.
+                    Required for the heatmap.
+        grid_resolution (tuple): Dimensions (rows, cols) for the heatmap grid.
+        save_path_prefix (str): Base path/filename for saving the generated plots
+                                (e.g., "output/vis_activity"). Suffixes will be added.
+        smoothing_window_ms (float): Time window (in ms) for the moving average smoothing
+                                     of the activation percentage plot. Set to 0 or None
+                                     to disable smoothing.
+    """
+    if n_neurons <= 0:
+        print("Warning: Cannot plot activity summary, n_neurons is 0 or negative.")
+        return
+    n_steps = len(activity_record)
+    if n_steps == 0:
+        print("Warning: Cannot plot activity summary, activity_record is empty.")
+        return
+
+    print(f"Generating activity timeline plot (Smoothing window: {smoothing_window_ms}ms)...")
+    plt.style.use('dark_background') # Ensure dark style
+
+    # --- Calculate derived data ---
+    time_axis_ms = np.arange(n_steps) * dt
+    activation_percentage = np.array([(len(spikes) / n_neurons) * 100.0 for spikes in activity_record]) # Use numpy array
+    avg_activation = np.mean(activation_percentage) if len(activation_percentage) > 0 else 0
+
+    # --- Calculate Smoothed Activation Percentage ---
+    smoothed_activation = None
+    if smoothing_window_ms and smoothing_window_ms > dt and len(activation_percentage) > 0:
+        window_size_steps = max(1, int(smoothing_window_ms / dt))
+        activation_series = pd.Series(activation_percentage)
+        # Use rolling mean, handle edges with min_periods=1, center the window
+        smoothed_activation = activation_series.rolling(window=window_size_steps, center=True, min_periods=1).mean().to_numpy()
+
+    # --- FIGURE 1: Smoothed Percentage Timeline ---
+    # Create a figure with a single subplot
+    fig1, ax_perc = plt.subplots(1, 1, figsize=(12, 6), facecolor='#1a1a1a')
+    fig1.suptitle("Network Activation Percentage Over Time", fontsize=16, color='white', y=0.98)
+
+    # Plot RAW data faintly (using a neutral blue/grey)
+    ax_perc.plot(time_axis_ms, activation_percentage, color='#4a6a8a', linewidth=0.5, alpha=0.3, label='Raw Activation (%)') # Faint blue/grey
+
+    # Plot SMOOTHED data clearly if calculated (in RED)
+    if smoothed_activation is not None:
+        ax_perc.plot(time_axis_ms, smoothed_activation, color='#e74c3c', linewidth=2.0, label=f'Smoothed ({smoothing_window_ms}ms avg)') # RED color
+        plot_title = "Smoothed Activation Percentage Over Time"
+        avg_text = f"Avg. Raw Activation: {avg_activation:.2f}%\nAvg. Smoothed: {np.mean(smoothed_activation):.2f}%"
+    else:
+        # If not smoothing, make raw data more prominent (using the original blue)
+        ax_perc.lines[0].set_color('#3498db') # Use the original blue
+        ax_perc.lines[0].set_linewidth(1.5)
+        ax_perc.lines[0].set_alpha(0.8)
+        plot_title = "Activation Percentage Over Time"
+        avg_text = f"Avg. Activation: {avg_activation:.2f}%"
+
+    # Style the plot
+    # ax_perc.set_title(plot_title, color='white') # Title is now suptitle
+    ax_perc.set_xlabel("Time (ms)", color='white', fontsize=12) # Add x-label back
+    ax_perc.set_ylabel("Activation (% of Neurons)", color='white', fontsize=12)
+    ax_perc.set_xlim(0, total_duration_ms)
+    ax_perc.set_ylim(0, max(1, np.max(activation_percentage) * 1.1) if len(activation_percentage)>0 else 1) # Y limit based on raw max
+    ax_perc.set_facecolor('#2a2a2a')
+    ax_perc.grid(True, alpha=0.2, linestyle=':')
+    ax_perc.tick_params(colors='white', axis='y')
+    ax_perc.tick_params(colors='white', axis='x') # Show x-axis ticks/labels
+    for spine in ax_perc.spines.values(): spine.set_color('gray')
+    ax_perc.text(0.98, 0.95, avg_text,
+                 transform=ax_perc.transAxes, color='silver', fontsize=10,
+                 ha='right', va='top', bbox=dict(facecolor='#333333', alpha=0.7, boxstyle='round'))
+    ax_perc.legend(loc='upper left', fontsize='small', facecolor='#333333', labelcolor='white', framealpha=0.7)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout for suptitle
+
+    # Save Figure 1
+    timeline_save_path = f"{save_path_prefix}_timeline_smoothed.png" # Updated filename
+    try:
+        plt.savefig(timeline_save_path, dpi=150, facecolor='#1a1a1a', bbox_inches='tight')
+        print(f"Saved smoothed activity timeline plot to {timeline_save_path}")
+    except Exception as e:
+        print(f"\nError saving smoothed activity timeline plot {timeline_save_path}: {e}")
+        traceback.print_exc()
+    plt.close(fig1)
+
+    # --- FIGURE 2: Activation Probability Heatmap (Code remains the same) ---
+    print(f"Generating activation probability heatmap...")
+    heatmap_save_path = f"{save_path_prefix}_heatmap.png"
+
+    if pos is None or not isinstance(pos, dict) or len(pos) == 0:
+        print("Warning: Neuron positions ('pos' dictionary) not provided or empty. Skipping heatmap generation.")
+        return
+    if grid_resolution is None or not isinstance(grid_resolution, tuple) or len(grid_resolution) != 2:
+        print("Warning: Invalid 'grid_resolution' provided. Skipping heatmap generation.")
+        return
+    grid_rows, grid_cols = grid_resolution
+    if grid_rows <= 0 or grid_cols <= 0:
+        print("Warning: Invalid grid dimensions in 'grid_resolution'. Skipping heatmap generation.")
+        return
+
+    spike_counts = np.zeros(n_neurons)
+    for step_spikes in activity_record:
+        try:
+            for idx in step_spikes:
+                if 0 <= idx < n_neurons:
+                    spike_counts[idx] += 1
+        except TypeError:
+             continue # Ignore non-iterable items
+
+    firing_probability = spike_counts / n_steps if n_steps > 0 else np.zeros(n_neurons)
+
+    valid_pos = {n: p for n, p in pos.items() if 0 <= n < n_neurons and isinstance(p, (tuple, list)) and len(p) == 2}
+    if not valid_pos:
+        print("Warning: No valid neuron positions found after filtering. Skipping heatmap.")
+        return
+
+    xs = [p[0] for p in valid_pos.values()]
+    ys = [p[1] for p in valid_pos.values()]
+    min_x, max_x = min(xs), max(xs); min_y, max_y = min(ys), max(ys)
+    x_range = max_x - min_x; y_range = max_y - min_y
+    x_margin = x_range * 0.01 if x_range > 1e-6 else 0.1
+    y_margin = y_range * 0.01 if y_range > 1e-6 else 0.1
+    min_x -= x_margin; max_x += x_margin
+    min_y -= y_margin; max_y += y_margin
+    x_range = max_x - min_x; y_range = max_y - min_y
+
+    heatmap_prob_sum = np.zeros((grid_rows, grid_cols))
+    heatmap_neuron_count = np.zeros((grid_rows, grid_cols), dtype=int)
+    for neuron_idx, (x, y) in valid_pos.items():
+        col = int(((x - min_x) / x_range) * (grid_cols - 1)) if x_range > 1e-9 else grid_cols // 2
+        row = int(((max_y - y) / y_range) * (grid_rows - 1)) if y_range > 1e-9 else grid_rows // 2
+        col = max(0, min(grid_cols - 1, col))
+        row = max(0, min(grid_rows - 1, row))
+        heatmap_prob_sum[row, col] += firing_probability[neuron_idx]
+        heatmap_neuron_count[row, col] += 1
+
+    heatmap_avg_prob = np.full((grid_rows, grid_cols), np.nan)
+    valid_cells = heatmap_neuron_count > 0
+    heatmap_avg_prob[valid_cells] = heatmap_prob_sum[valid_cells] / heatmap_neuron_count[valid_cells]
+
+    fig2, ax_heatmap = plt.subplots(figsize=(max(8, grid_cols/grid_rows * 7), 7), facecolor='#1a1a1a')
+
+    if np.any(valid_cells):
+        min_prob_nz = np.nanmin(heatmap_avg_prob[heatmap_avg_prob > 0]) if np.any(heatmap_avg_prob > 0) else 1e-6
+        max_prob = np.nanmax(heatmap_avg_prob) if np.any(valid_cells) else 1.0
+        norm = LogNorm(vmin=max(1e-9, min_prob_nz), vmax=max(1e-8, max_prob)) if max_prob > 0 and max_prob / min_prob_nz > 100 else None
+        cmap = plt.cm.hot
+        cmap.set_bad(color='#1a1a1a')
+        im = ax_heatmap.imshow(heatmap_avg_prob, cmap=cmap, interpolation='nearest', origin='upper', norm=norm, aspect='auto')
+        cbar = plt.colorbar(im, ax=ax_heatmap, fraction=0.046, pad=0.04)
+        cbar.set_label('Average Firing Probability per Grid Cell', color='white', fontsize=10)
+        cbar.ax.tick_params(colors='white', labelsize=9)
+        plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white')
+    else:
+        ax_heatmap.text(0.5, 0.5, "No Activity Recorded\nCannot Generate Heatmap", color='grey', ha='center', va='center')
+
+    ax_heatmap.set_title("Spatial Heatmap of Neuron Firing Probability", color='white', fontsize=14)
+    ax_heatmap.set_xticks([]); ax_heatmap.set_yticks([])
+    ax_heatmap.set_facecolor('#1a1a1a')
+    for spine in ax_heatmap.spines.values(): spine.set_color('gray')
+
+    plt.tight_layout()
+    try:
+        plt.savefig(heatmap_save_path, dpi=150, facecolor='#1a1a1a', bbox_inches='tight')
+        print(f"Saved activation probability heatmap to {heatmap_save_path}")
+    except Exception as e:
+        print(f"\nError saving activation heatmap plot {heatmap_save_path}: {e}")
+        traceback.print_exc()
+    plt.close(fig2)
+
+
+
+
 # --- Main Execution Block ---
 if __name__ == "__main__":
     start_overall_time = time.time()
 
     # --- Configuration Loading ---
-    CONFIG_FILE = "ga_mnist_snn_vectorized_precomputed_output/best_snn_2class_fixed_structure_precomputed_config.json"
+    CONFIG_FILE = "ga_mnist_snn_vectorized_precomputed_output/best_snn_3class_fixed_structure_precomputed_config.json"
     SAVED_STATE_DIR = os.path.dirname(CONFIG_FILE)
 
     # keep these for debugging purposes
@@ -611,12 +798,22 @@ if __name__ == "__main__":
             raise ValueError("'neuron_config' in config file must be a dictionary.")
 
         # --- Configuration for this Eval/Vis script ---
-        TOTAL_SIMULATION_DURATION_MS = 150
+        TOTAL_SIMULATION_DURATION_MS = 90
         STIM_CONFIG = {'strength': 25.0, 'pulse_duration_ms': SIM_DT}
         ANIMATE_ACTIVITY = True # Set to True to generate activity GIF
         EVALUATION_SAMPLES = 3000 # Number of test samples to evaluate
         VIS_OUTPUT_DIR = "evaluation_and_visualization_output"
         if not os.path.exists(VIS_OUTPUT_DIR): os.makedirs(VIS_OUTPUT_DIR)
+
+
+
+
+
+
+
+
+
+
 
         # Construct filenames based on loaded config
         BASE_FILENAME = f"best_snn_{N_CLASSES}class_fixed_structure_precomputed"
@@ -893,6 +1090,21 @@ if __name__ == "__main__":
             vis_output_prefix = os.path.join(VIS_OUTPUT_DIR, f"vis_digit_{TARGET_VIS_CLASS}_pred_{vis_predicted_label}_mode_{LOADED_ENCODING_MODE}_example") # Add mode to filename
             pos_for_vis = pos_loaded
             if not isinstance(pos_for_vis, dict): pos_for_vis = None
+
+            #activity sparsity plots
+            if vis_activity_record: # Check if simulation produced activity
+                activity_plot_prefix = f"{vis_output_prefix}_activity" # Use prefix
+                # Define grid resolution (adjust as needed, maybe match GIF?)
+                heatmap_grid_res = (100, 150)
+                plot_activity_summary_and_heatmap(
+                    activity_record=vis_activity_record,
+                    n_neurons=network_obj.n_neurons,
+                    dt=SIM_DT,
+                    total_duration_ms=TOTAL_SIMULATION_DURATION_MS,
+                    pos=pos_for_vis,                # Pass the loaded positions
+                    grid_resolution=heatmap_grid_res, # Pass the desired heatmap grid size
+                    save_path_prefix=activity_plot_prefix # Pass the prefix
+                )
 
             print("Generating structure plot...")
             # Ensure stimulated/connected neurons are handled if needed by plot function
