@@ -1,0 +1,41 @@
+{
+    "source": "ANN-to-SNN Conversion with Recurrence",
+    "ann_epochs": 30,
+    "pruning_amount": 0.94,
+    "final_ann_sparsity": 94.00007476076556,
+    "layers_config": [
+        784,
+        256,
+        256,
+        5
+    ],
+    "inhibitory_fraction_used": 0.2,
+    "neuron_config": {
+        "v_rest": -65.0,
+        "v_threshold": -55.0,
+        "v_reset": -75.0,
+        "tau_m": 10.0,
+        "tau_ref": 1.5,
+        "tau_e": 3.0,
+        "tau_i": 7.0,
+        "e_reversal": 0.0,
+        "i_reversal": -70.0,
+        "v_noise_amp": 0.005,
+        "i_noise_amp": 0.0005,
+        "adaptation_increment": 0.3,
+        "tau_adaptation": 120
+    },
+    "base_transmission_delay_used": 0.1,
+    "simulation_dt": 0.1,
+    "random_seed": 42,
+    "n_neurons_total": 1301,
+    "n_connections": 35869,
+    "n_classes": 5,
+    "downsample_factor_for_input": 1,
+    "mnist_stim_duration_ms": 50.0,
+    "max_frequency_hz": 200.0,
+    "encoding_mode_used": "intensity_to_neuron",
+    "hidden_layer_inhibition_prob": 0.15,
+    "output_layer_inhibition_strength": -0.05,
+    "hidden_layer_inhibition_weight": -0.02
+}
