@@ -1,0 +1,12 @@
+# Claude Code
+.claude/
+
+# Byte-compiled / optimized files
+__pycache__/
+*.pyc
+
+# OS Specific files
+.DS_Store
+
+# Editors
+.vscode/
