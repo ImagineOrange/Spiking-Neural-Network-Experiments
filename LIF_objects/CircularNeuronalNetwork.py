@@ -2,7 +2,7 @@ import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 from collections import deque
-from LIFNeuronWithReversal import LIFNeuronWithReversal
+from .LIFNeuronWithReversal import LIFNeuronWithReversal
 
 class CircularNeuronalNetwork:
     """
@@ -15,11 +15,12 @@ class CircularNeuronalNetwork:
     
     This provides a comprehensive neural simulation framework.
     """
-    def __init__(self, n_neurons=100, connection_p=0.1, weight_scale=1.0, 
-            weight_min=0.0, spatial=True, transmission_delay=1.0, 
+    def __init__(self, n_neurons=100, connection_p=0.1, weight_scale=1.0,
+            weight_min=0.0, spatial=True, transmission_delay=1.0,
             inhibitory_fraction=0.2, layout='grid',
             v_noise_amp=0.3, i_noise_amp=0.05,
-            e_reversal=0.0, i_reversal=-80.0, distance_lambda=1):
+            e_reversal=0.0, i_reversal=-80.0, distance_lambda=1,
+            std_enabled=False, U=0.3, tau_d=400.0):
         """
         Initialize the network with the given parameters.
         
@@ -51,11 +52,22 @@ class CircularNeuronalNetwork:
             Inhibitory reversal potential (mV)
         distance_lambda : float
             Distance decay constant for synaptic weights (higher values mean faster decay)
+        std_enabled : bool
+            Enable Short-Term Synaptic Depression (Tsodyks-Markram model)
+        U : float
+            Utilization factor for STD (fraction of resources released per spike)
+        tau_d : float
+            Recovery time constant for STD in ms
         """
         # Store distance decay parameter
         self.distance_lambda = distance_lambda
         self.n_neurons = n_neurons
         self.weight_scale = weight_scale
+
+        # STD state variables
+        self.std_enabled = std_enabled
+        self.U = U  # Utilization factor
+        self.tau_d = tau_d  # Recovery time constant (ms)
         
         # Calculate grid dimensions (approximate square)
         self.side_length = int(np.ceil(np.sqrt(n_neurons)))
@@ -127,7 +139,14 @@ class CircularNeuronalNetwork:
         # Initialize connection matrices - these will only store non-zero weights
         self.weights = np.zeros((n_neurons, n_neurons))
         self.delays = np.zeros((n_neurons, n_neurons))
-        
+
+        # Initialize STD synaptic resources if enabled
+        if std_enabled:
+            # All synapses start with full resources (x = 1.0)
+            self.x_resources = np.ones((n_neurons, n_neurons))
+        else:
+            self.x_resources = None
+
         # Variables for tracking activity
         self.network_activity = []
         
@@ -312,7 +331,11 @@ class CircularNeuronalNetwork:
         
         # Clear the spike queue
         self.spike_queue = deque()
-    
+
+        # Reset STD resources
+        if self.std_enabled:
+            self.x_resources = np.ones((self.n_neurons, self.n_neurons))
+
     def stimulate_neuron(self, idx, current):
         """Stimulate a specific neuron with given current."""
         if 0 <= idx < self.n_neurons:
@@ -392,7 +415,13 @@ class CircularNeuronalNetwork:
             # Reset tracking
             self.current_avalanche_start = None
             self.current_avalanche_size = 0
-        
+
+        # STD: Recover synaptic resources every timestep
+        if self.std_enabled:
+            # Exponential recovery: x(t+dt) = x(t) + (1 - x(t)) * (1 - exp(-dt/tau_d))
+            recovery_factor = 1.0 - np.exp(-dt / self.tau_d)
+            self.x_resources += (1.0 - self.x_resources) * recovery_factor
+
         # Process pending spikes that have reached their target time
         current_time = len(self.network_activity) * dt
         delivered_spikes = 0
@@ -411,14 +440,29 @@ class CircularNeuronalNetwork:
             # Use graph edges for propagation instead of iterating through all neurons
             # This efficiently skips zero-weight connections
             for j in self.graph.successors(i):
-                weight = self.weights[i, j]
+                weight_base = self.weights[i, j]
                 delay = self.delays[i, j]
-                
+
+                # Apply STD if enabled
+                if self.std_enabled:
+                    x = self.x_resources[i, j]  # Current available resources
+                    u = self.U  # Utilization (release probability)
+
+                    # Compute effective weight with depression
+                    weight_effective = weight_base * u * x
+
+                    # Deplete resources: x ← x(1 - u)
+                    self.x_resources[i, j] = x * (1.0 - u)
+
+                    weight_to_deliver = weight_effective
+                else:
+                    weight_to_deliver = weight_base
+
                 # Calculate delivery time
                 delivery_time = current_time + delay
-                
+
                 # Add to queue (delivery_time, source, target, weight)
-                self.spike_queue.append((delivery_time, i, j, weight))
+                self.spike_queue.append((delivery_time, i, j, weight_to_deliver))
         
         # Sort the queue by delivery time to ensure proper order
         if active_indices:

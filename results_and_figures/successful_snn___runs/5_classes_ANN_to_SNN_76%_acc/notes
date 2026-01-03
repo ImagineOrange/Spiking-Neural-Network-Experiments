@@ -1,0 +1,3 @@
+tuning the pruning % seems to be affectign network performance significantly. along with adding some noise which i did here. this is so far the best run for SNN on 5 classes. thinking about manually adding some recurrent inhibition. 
+
+Also, could try using conv features as inputs. Will continue in the tuning direction first. 

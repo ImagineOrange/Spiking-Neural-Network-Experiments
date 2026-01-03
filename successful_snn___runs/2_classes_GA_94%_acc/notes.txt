@@ -1,1 +1,0 @@
-this experiment was trained on machine local, with 2 classes. importantly, dt was .1ms and encoding was via pixel intensity. 

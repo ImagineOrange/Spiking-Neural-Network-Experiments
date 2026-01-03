@@ -16,15 +16,15 @@ from LIF_utils.network_vis_utils import plot_network_connections_sparse, visuali
 from LIF_utils.neuron_vis_utils import plot_reversal_effects
 from LIF_utils.criticality_analysis_utils import plot_enhanced_criticality_analysis,analyze_criticality_comprehensively
 from LIF_utils.correlation_length_utils import visualize_spatial_correlations
-from LIF_utils.criticality_params_grid_search import LIF_utils.criticality_params_grid_search
 
 
-def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,  
-                            duration=5000.0, dt=0.1, stim_interval=None, stim_interval_strength=10, 
+def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
+                            duration=5000.0, dt=0.1, stim_interval=None, stim_interval_strength=10,
                             stim_fraction=0.01, transmission_delay=2.0, inhibitory_fraction=0.2,
                             stochastic_stim=True, layout='circle', no_stimulation=False,
                             enable_noise=True, v_noise_amp=0.3, i_noise_amp=0.05,
-                            e_reversal=0.0, i_reversal=-80.0, random_seed=42, distance_lambda=0.1, animate = False):
+                            e_reversal=0.0, i_reversal=-80.0, random_seed=42, distance_lambda=0.1, animate=False,
+                            std_enabled=False, U=0.3, tau_d=400.0):
     """
     Run experiment with the improved neuron model that includes reversal potentials.
     
@@ -68,6 +68,12 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
             Distance decay constant for synaptic weights (higher values mean faster decay)
     animate : bool
             If True, generate an animation of the neural activity grid
+    std_enabled : bool
+        Enable Short-Term Synaptic Depression (default: False)
+    U : float
+        Utilization factor for STD (fraction of resources released per spike)
+    tau_d : float
+        Recovery time constant for STD in ms
     """
     print("Creating neural network with reversal potentials and biologically plausible parameters...")
     
@@ -81,7 +87,7 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
     
     # Create network with the new enhanced model
     network = CircularNeuronalNetwork(
-        n_neurons=n_neurons, 
+        n_neurons=n_neurons,
         connection_p=connection_p,
         weight_scale=weight_scale,
         spatial=True,
@@ -90,9 +96,12 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
         layout=layout,
         v_noise_amp=actual_v_noise,
         i_noise_amp=actual_i_noise,
-        e_reversal=e_reversal,      # Excitatory reversal potential
+        e_reversal=e_reversal,       # Excitatory reversal potential
         i_reversal=i_reversal,       # Inhibitory reversal potential
-        distance_lambda=distance_lambda
+        distance_lambda=distance_lambda,
+        std_enabled=std_enabled,     # Short-Term Depression
+        U=U,                         # STD utilization factor
+        tau_d=tau_d                  # STD recovery time constant
     )
 
     # Choose a neuron to visualize
@@ -369,17 +378,24 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
 
 
 # Function to run experiment with biologically plausible parameters optimized for criticality
-def run_biologically_plausible_simulation(random_seed=42):
+def run_biologically_plausible_simulation(random_seed=42, std_enabled=False):
     """
     Run a simulation with biologically plausible parameters optimized for
     observing neuronal avalanches, using the enhanced neuron model with reversal potentials.
-    
+
     Based on parameters that give the best criticality score in previous grid search.
+
+    Parameters:
+    -----------
+    random_seed : int
+        Random seed for reproducibility
+    std_enabled : bool
+        Enable Short-Term Synaptic Depression (default: False)
     """
 
     return run_improved_experiment(
         # Network parameters
-        n_neurons=3000,              # Local cortical circuit size
+        n_neurons=500,               # Local cortical circuit size
         connection_p=0.3,            # 5% connectivity in local cortical circuits
         weight_scale=0.1,            # Further reduced weight scale to prevent super-critical activity
         inhibitory_fraction=.3,      # 20% inhibitory neurons is biologically realistic
@@ -391,7 +407,7 @@ def run_biologically_plausible_simulation(random_seed=42):
         dt=0.1,                       # 0.1 ms for precise spike timing
         
         # Stimulation parameters
-        stim_interval=100,           # 300ms stimulation interval
+        stim_interval=50,            # 300ms stimulation interval
         stim_interval_strength=50,   # Reduced stimulation strength
         stim_fraction=.01,           # Regular stimulation for this experiment
         no_stimulation = True,
@@ -405,11 +421,16 @@ def run_biologically_plausible_simulation(random_seed=42):
         # Reversal potential parameters (biophysically realistic values)
         e_reversal=0.0,               # AMPA/NMDA reversal potential
         i_reversal=-80.0,             # GABA-A reversal potential
-        
+
+        # STD parameters
+        std_enabled = False,          # Short-Term Depression toggle
+        U=0.3,                        # 30% release probability
+        tau_d=150,                    # 150ms recovery time constant
+
         # Other parameters
         layout='circle',              # Layout for visualization
-        random_seed=random_seed, 
-        animate = True       # Random seed for reproducibility
+        random_seed=random_seed,
+        animate=True       # Random seed for reproducibility
     )
 
 
