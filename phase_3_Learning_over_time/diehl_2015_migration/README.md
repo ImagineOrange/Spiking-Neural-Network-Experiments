@@ -1,5 +1,12 @@
 # Spiking Neural Network for MNIST Classification
 
+
+<img width="939" height="483" alt="Screenshot 2026-01-12 at 2 00 23 AM" src="https://github.com/user-attachments/assets/e45609ac-f20b-4cbb-8cfe-c52efc4e6774" />
+
+
+
+
+
 Implementation of the paper **"Unsupervised learning of digit recognition using spike-timing-dependent plasticity"** by Diehl & Cook (2015).
 
 [Paper Link](http://journal.frontiersin.org/article/10.3389/fncom.2015.00099/abstract)
