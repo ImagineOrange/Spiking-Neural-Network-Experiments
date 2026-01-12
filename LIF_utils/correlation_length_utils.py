@@ -283,12 +283,34 @@ def visualize_spatial_correlations(network, activity_record, time_bin_ms=10, dt=
     if len(active_neurons) < 10:
         print("Too few active neurons for correlation analysis")
         return {"success": False, "error": "Too few active neurons"}
-    
-    # Calculate correlation matrix for active neurons
-    correlation_matrix = np.corrcoef(binned_activity[:, active_neurons].T)
-    
+
+    # Filter out neurons with zero variance (constant activity)
+    # These produce NaN in correlation calculations
+    activity_subset = binned_activity[:, active_neurons].T
+    neuron_std = np.std(activity_subset, axis=1)
+    varying_mask = neuron_std > 0
+
+    # Keep only neurons with varying activity
+    varying_neurons = active_neurons[varying_mask]
+
+    print(f"Neurons with varying activity: {len(varying_neurons)} out of {len(active_neurons)}")
+
+    if len(varying_neurons) < 10:
+        print("Too few varying neurons for correlation analysis")
+        return {"success": False, "error": "Too few varying neurons"}
+
+    # Update active neurons to only include those with variance
+    active_neurons = varying_neurons
+
+    # Calculate correlation matrix for neurons with varying activity
+    with np.errstate(invalid='ignore'):  # Suppress warnings, we've already filtered
+        correlation_matrix = np.corrcoef(binned_activity[:, active_neurons].T)
+
+    # Replace any remaining NaNs with 0
+    correlation_matrix = np.nan_to_num(correlation_matrix, nan=0.0)
+
     print(f"Correlation matrix shape: {correlation_matrix.shape}")
-    print(f"Correlation range: {np.min(correlation_matrix):.4f} to {np.max(correlation_matrix):.4f}")
+    print(f"Correlation range: {np.nanmin(correlation_matrix):.4f} to {np.nanmax(correlation_matrix):.4f}")
     
     # Calculate distance matrix for active neurons
     distances = np.zeros((len(active_neurons), len(active_neurons)))

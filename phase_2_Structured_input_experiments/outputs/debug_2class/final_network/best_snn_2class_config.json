@@ -1,0 +1,69 @@
+{
+    "experiment_name": "debug_2class",
+    "random_seed": 42,
+    "target_classes": [
+        0,
+        1
+    ],
+    "hidden_layers": [
+        20,
+        10
+    ],
+    "layer_config": [
+        49,
+        20,
+        10,
+        2
+    ],
+    "n_neurons": 81,
+    "n_connections": 1667,
+    "inhibitory_fraction": 0.2,
+    "encoding_mode": "intensity_to_neuron",
+    "downsample_factor": 4,
+    "conv_weights_path": "../MNIST_utils/conv_model_weights/conv_model_weights.pth",
+    "conv_feature_count": 49,
+    "sim_duration_ms": 30.0,
+    "sim_dt_ms": 0.1,
+    "mnist_stim_duration_ms": 20.0,
+    "max_freq_hz": 200.0,
+    "stim_strength": 25.0,
+    "base_transmission_delay": 1.0,
+    "connection_probs": {
+        "exc_recurrent": 0.0,
+        "inh_recurrent": 0.3,
+        "feedforward_1": 1.0,
+        "feedforward_2": 1.0,
+        "feedback_1": 0.06,
+        "feedback_2": 0.0,
+        "long_feedforward": 0.0,
+        "long_feedback": 0.0
+    },
+    "neuron_params": {
+        "v_rest": -65.0,
+        "v_threshold": -55.0,
+        "v_reset": -75.0,
+        "tau_m": 10.0,
+        "tau_ref": 1.5,
+        "tau_e": 3.0,
+        "tau_i": 7.0,
+        "e_reversal": 0.0,
+        "i_reversal": -70.0,
+        "v_noise_amp": 0.0,
+        "i_noise_amp": 0.0005,
+        "adaptation_increment": 0.3,
+        "tau_adaptation": 120
+    },
+    "output_mutual_inhibition_weight": -0.05,
+    "output_mutual_inhibition_delay": 0.1,
+    "ga_generations": 200,
+    "ga_population": 10,
+    "mutation_rate": 0.08,
+    "mutation_strength": 0.005,
+    "crossover_rate": 0.7,
+    "elitism_count": 2,
+    "tournament_size": 3,
+    "fitness_eval_examples": 100,
+    "weight_min": 0.002,
+    "weight_max": 0.35,
+    "best_fitness": 0.576096599131427
+}

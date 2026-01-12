@@ -139,10 +139,10 @@ def plot_individual_avalanche_statistics(network, save_path_prefix="avalanche", 
     dur_probabilities = dur_counts / total_avalanches
     
     # Plot individual avalanche duration data points
-    ax_dur.loglog(unique_durations, dur_probabilities, 'o', color='#1f77b4', 
+    ax_dur.loglog(unique_durations, dur_probabilities, 'o', color='#1f77b4',
                 markersize=6, alpha=0.7, label="Individual Avalanches")
     # Force background color again after loglog (which sometimes resets it)
-    ax_size.set_facecolor('#1a1a1a')
+    ax_dur.set_facecolor('#1a1a1a')
     
     # Fit power law using linear regression in log-log space
     if len(network.avalanche_durations) > 10:
@@ -164,18 +164,18 @@ def plot_individual_avalanche_statistics(network, save_path_prefix="avalanche", 
             ax_dur.loglog(x_fit, y_fit, '--', color='white', alpha=0.7, linewidth=2.5,
                         label=f"Power Law Fit: α = {alpha_dur:.2f}, R² = {r_value**2:.2f}")
             # Force background color again after loglog (which sometimes resets it)
-            ax_size.set_facecolor('#1a1a1a')
-            
+            ax_dur.set_facecolor('#1a1a1a')
+
             # Add reference line with ideal slope
             ideal_alpha = 2.0
             # Keep same intercept as our fitted line
             ideal_log_y = intercept - ideal_alpha * np.log10(x_fit)
             ideal_y = 10**ideal_log_y
-            
+
             ax_dur.loglog(x_fit, ideal_y, '-.', color='#1dd1a1', alpha=0.7, linewidth=2,
                         label=f"Ideal Power Law: α = {ideal_alpha}")
             # Force background color again after loglog (which sometimes resets it)
-            ax_size.set_facecolor('#1a1a1a')
+            ax_dur.set_facecolor('#1a1a1a')
             
         except Exception as e:
             print(f"Power law fitting error for durations: {e}")
@@ -217,13 +217,10 @@ def plot_individual_avalanche_statistics(network, save_path_prefix="avalanche", 
     ax_scatter = scatter_fig.add_subplot(111)
     
     # Plot scatter of size vs duration
-    ax_scatter.loglog(network.avalanche_durations, network.avalanche_sizes, 'o', 
+    ax_scatter.loglog(network.avalanche_durations, network.avalanche_sizes, 'o',
                      color='#9b59b6', alpha=0.6, markersize=6, label="Individual Avalanches")
     # Force background color again after loglog (which sometimes resets it)
-    ax_size.set_facecolor('#1a1a1a')
-    
-    # Force background color again after loglog (which sometimes resets it)
-    ax_size.set_facecolor('#1a1a1a')
+    ax_scatter.set_facecolor('#1a1a1a')
     
     # Try to fit a power law relationship
     if len(network.avalanche_sizes) > 10:
@@ -243,16 +240,16 @@ def plot_individual_avalanche_statistics(network, save_path_prefix="avalanche", 
             # Plot the fitted relationship
             ax_scatter.loglog(x_fit, y_fit, '--', color='white', alpha=0.7, linewidth=2.5,
                            label=f"Fit: Size ~ Duration^{slope:.2f}, R²={r_value**2:.2f}")
-        
+
             # Force background color again after loglog (which sometimes resets it)
-            ax_size.set_facecolor('#1a1a1a')
-            
+            ax_scatter.set_facecolor('#1a1a1a')
+
             # Mark the critical theoretical relationship (slope = 1.5)
             critical_y = 10**(intercept) * (x_fit ** 1.5)
             ax_scatter.loglog(x_fit, critical_y, '-.', color='#1dd1a1', alpha=0.7, linewidth=2,
                            label=f"Critical Theory: Size ~ Duration^1.5")
             # Force background color again after loglog (which sometimes resets it)
-            ax_size.set_facecolor('#1a1a1a')        
+            ax_scatter.set_facecolor('#1a1a1a')        
 
         except Exception as e:
             print(f"Regression error for size vs duration: {e}")
@@ -294,13 +291,16 @@ def plot_individual_avalanche_statistics(network, save_path_prefix="avalanche", 
     # Calculate branching ratio (number of descendants per ancestor)
     activity = np.array(network.network_activity)
     non_zero_idx = np.where(activity > 0)[0]
-    
+
     # We need to ensure we have enough data and no division by zero
-    if len(non_zero_idx) > 1 and np.max(non_zero_idx) < len(activity) - 1:
+    # Note: We filter out indices at the boundary when computing next_idx below
+    if len(non_zero_idx) > 1:
+        # Get indices of the next timestep after each active period
         next_idx = non_zero_idx + 1
+        # Keep only valid indices (not past the end of the array)
         valid_idx = next_idx[next_idx < len(activity)]
         prev_idx = valid_idx - 1
-        
+
         # Only include cases where the previous activity is non-zero (avoid div by zero)
         valid_mask = activity[prev_idx] > 0
         if np.sum(valid_mask) > 0:
@@ -355,12 +355,14 @@ def plot_individual_avalanche_statistics(network, save_path_prefix="avalanche", 
                          transform=ax_branch.transAxes, fontsize=14, color='white',
                          ha='center', va='center')
     else:
-        ax_branch.text(0.5, 0.5, "Insufficient activity data for branching analysis", 
+        ax_branch.text(0.5, 0.5, "Insufficient activity data for branching analysis",
                      transform=ax_branch.transAxes, fontsize=14, color='white',
                      ha='center', va='center')
-    
-    # Add legend
-    ax_branch.legend(loc='upper right', framealpha=0.7, fontsize=12)
+
+    # Add legend only if we have artists with labels
+    handles, labels = ax_branch.get_legend_handles_labels()
+    if handles:
+        ax_branch.legend(loc='upper right', framealpha=0.7, fontsize=12)
     
     # Style improvements
     ax_branch.set_facecolor('#1a1a1a')

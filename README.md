@@ -12,19 +12,19 @@ Inhibitory inputs increase inhibitory conductance (`g_i`). These conductances in
 
 The networks in this repo are sparsely connected, and have modifiable topologies (layered, circular, etc...). Activity in these networks is very dynamic and sometimes sparse. Parameters need to be chosen carefully to avoid sub-critical (silence) and super-critical (tonic firing, seizure-like) states. Neuron parameters are chosen to be as biologically plausible as possible. Network excitation/inhibition ratio and sparse connection probabilities are biologically plausible also.
 
-**This project has several goals:**
+**This project is organized into four phases:**
 
-1. **Build LIF neurons** and document their behavior (Achieved -- figures found in functional_diagnostic directory)
+## Phase 0: Biologically Plausible LIF Neuron Models
+Development and validation of conductance-based Leaky-Integrate-and-Fire (LIF) neurons. Includes functional diagnostics demonstrating subthreshold dynamics, action potential generation, membrane decay, spike-frequency adaptation, and conductance-based synaptic transmission. Contains scripts for characterizing single neuron behavior and short-term synaptic depression.
 
-2. **Build networks** and record their activity in a variety of activity regimes (sub-critical, **critical**, super critical), with activity that can propagate through layers without dying off (Achieved -- figures can be found in experiment_layered directory)
+## Phase 1: Networks of LIF Neurons
+Construction of sparse, recurrently connected networks with modifiable topologies (layered, circular). Exploration of network dynamics across activity regimes (sub-critical, critical, super-critical) with parameter tuning to achieve critical dynamics where activity propagates reliably through layers without dying off or becoming runaway excitation.
 
-3. Tune neuron/network params to produce networks with **critical** activity (Achieved -- using grid search on many hyper params, figures in experiment_circular directory)
+## Phase 2: Structured Input Experiments
+Implementation of computational tasks using spiking networks, specifically MNIST digit classification. Uses genetic algorithms to evolve synaptic weights for networks with fixed topology. Includes multiple encoding strategies (intensity-to-rate, convolutional features), network architectures, and evaluation pipelines. Contains successful trained networks achieving 76-94% accuracy on 2-5 class subsets of MNIST.
 
-4. Build layered networks **capable of learned computational tasks**, like digit classification -- initially weights will be selected for using genetic algorithms as a proof-of-concept -- IN PROGRESS
-
-5. Implement a **learning paradigm** like spike-timing-dependent-plasticity (STDP) -- IN PROGRESS
-
-*Real Readme coming soon.....*
+## Phase 3: Learning Over Time
+Migration toward biologically-plausible learning rules, specifically implementing Spike-Timing-Dependent Plasticity (STDP) based on the Diehl & Cook 2015 approach. Aims to replace genetic algorithm weight optimization with online learning through local synaptic plasticity rules.
 
 ![Network visualization showing sparse connections and node activity](https://github.com/user-attachments/assets/fee5d93d-233e-4405-a015-d074a1fd1ae4)
 
