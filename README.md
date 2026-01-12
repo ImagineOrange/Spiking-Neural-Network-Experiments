@@ -24,7 +24,7 @@ Construction of sparse, recurrently connected networks with modifiable topologie
 Implementation of computational tasks using spiking networks, specifically MNIST digit classification. Uses genetic algorithms to evolve synaptic weights for networks with fixed topology. Includes multiple encoding strategies (intensity-to-rate, convolutional features), network architectures, and evaluation pipelines. Contains successful trained networks achieving 76-94% accuracy on 2-5 class subsets of MNIST.
 
 ## Phase 3: Learning Over Time
-Migration toward biologically-plausible learning rules, specifically implementing Spike-Timing-Dependent Plasticity (STDP) based on the Diehl & Cook 2015 approach. Aims to replace genetic algorithm weight optimization with online learning through local synaptic plasticity rules.
+Migration toward biologically-plausible learning rules, specifically implementing Spike-Timing-Dependent Plasticity (STDP) based on the Diehl & Cook 2015 approach. Aims to replace genetic algorithm weight optimization with online learning through local synaptic plasticity rules. This phase represents a transition from our home-made neuron and network objects, and implements those objects directly from a legagacy codebase provided by the original paper in 2015. The codebase has been modernized for ease of use. 
 
 ![Network visualization showing sparse connections and node activity](https://github.com/user-attachments/assets/fee5d93d-233e-4405-a015-d074a1fd1ae4)
 
