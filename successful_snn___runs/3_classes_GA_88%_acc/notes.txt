@@ -1,2 +1,0 @@
-this experiment was trained on jackie's server with a dt of 1ms and 3 classes. 
-importntly, the config records that the encoding mechanism was conv features

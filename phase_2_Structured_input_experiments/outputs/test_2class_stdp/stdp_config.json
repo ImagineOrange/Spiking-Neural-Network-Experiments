@@ -1,0 +1,27 @@
+{
+    "experiment_name": "test_2class_stdp",
+    "random_seed": 42,
+    "target_classes": [
+        0,
+        1
+    ],
+    "layer_config": [
+        49,
+        20,
+        15,
+        2
+    ],
+    "num_epochs": 1,
+    "stdp_a_plus": 0.001,
+    "stdp_a_minus": 0.0012,
+    "stdp_tau_pre": 20.0,
+    "stdp_tau_post": 20.0,
+    "phase_durations": {
+        "input": 50.0,
+        "readout": 30.0,
+        "learning": 50.0,
+        "rest": 20.0
+    },
+    "homeostatic_normalization": true,
+    "shuffle_each_epoch": true
+}

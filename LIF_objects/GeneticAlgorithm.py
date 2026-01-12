@@ -10,7 +10,8 @@ class GeneticAlgorithm:
     def __init__(self, population_size, chromosome_length, fitness_func, fitness_func_args, # Pass fixed args
                  mutation_rate=0.05, mutation_strength=0.01, crossover_rate=0.7,
                  elitism_count=2, tournament_size=5,
-                 weight_min=-0.02, weight_max=0.02):
+                 weight_min=-0.02, weight_max=0.02,
+                 init_weight_mode="random_small", init_weight_std=0.02):
         self.population_size = population_size
         self.chromosome_length = chromosome_length
         self.fitness_func = fitness_func # Function handle
@@ -22,19 +23,79 @@ class GeneticAlgorithm:
         self.tournament_size = tournament_size
         self.weight_min = weight_min
         self.weight_max = weight_max
+        self.init_weight_mode = init_weight_mode
+        self.init_weight_std = init_weight_std
         self.population = self._initialize_population()
         self.fitness_scores = np.full(population_size, -np.inf)
 
+        # Print initialization statistics
+        self._print_init_stats()
+
     def _initialize_population(self):
-        # Initialize weights with small random values
+        """
+        Initialize population based on init_weight_mode.
+
+        Options:
+            - 'zero': All weights start at 0.0
+            - 'random_small': Small random weights using init_weight_std
+        """
         population = []
-        for _ in range(self.population_size):
-             # Consider initializing closer to zero, or using a distribution
-             # chromosome = np.random.uniform(self.weight_min, self.weight_max, self.chromosome_length)
-             chromosome = np.random.normal(0, (self.weight_max - self.weight_min)/4 , self.chromosome_length)
-             chromosome = np.clip(chromosome, self.weight_min, self.weight_max)
-             population.append(chromosome)
+
+        if self.init_weight_mode == "zero":
+            # All weights start at exactly 0.0
+            for _ in range(self.population_size):
+                chromosome = np.zeros(self.chromosome_length)
+                population.append(chromosome)
+
+        elif self.init_weight_mode == "random_small":
+            # Small random weights centered at 0 with specified std dev
+            for _ in range(self.population_size):
+                chromosome = np.random.normal(0, self.init_weight_std, self.chromosome_length)
+                chromosome = np.clip(chromosome, self.weight_min, self.weight_max)
+                population.append(chromosome)
+
+        else:
+            raise ValueError(
+                f"Unknown init_weight_mode: '{self.init_weight_mode}'. "
+                f"Valid options: 'zero', 'random_small'"
+            )
+
         return population
+
+    def _print_init_stats(self):
+        """Print statistics about the initialized population weights."""
+        # Concatenate all chromosomes to get overall statistics
+        all_weights = np.concatenate(self.population)
+
+        print(f"\n=== Weight Initialization Statistics ===")
+        print(f"Method: {self.init_weight_mode}")
+        print(f"Population size: {self.population_size}")
+        print(f"Chromosome length: {self.chromosome_length}")
+        print(f"Total weights: {len(all_weights):,}")
+        print(f"\nWeight statistics across all individuals:")
+        print(f"  Min:    {all_weights.min():.6f}")
+        print(f"  Max:    {all_weights.max():.6f}")
+        print(f"  Mean:   {all_weights.mean():.6f}")
+        print(f"  Std:    {all_weights.std():.6f}")
+        print(f"  Median: {np.median(all_weights):.6f}")
+
+        if self.init_weight_mode == "random_small":
+            print(f"\nConfigured init_weight_std: {self.init_weight_std:.6f}")
+            print(f"Actual observed std:        {all_weights.std():.6f}")
+
+        print(f"\nWeight bounds:")
+        print(f"  Min allowed: {self.weight_min:.6f}")
+        print(f"  Max allowed: {self.weight_max:.6f}")
+
+        # Count how many weights are at boundaries (clipped)
+        at_min = np.sum(np.abs(all_weights - self.weight_min) < 1e-10)
+        at_max = np.sum(np.abs(all_weights - self.weight_max) < 1e-10)
+        if at_min > 0 or at_max > 0:
+            print(f"\nClipped weights:")
+            print(f"  At min boundary: {at_min:,} ({100*at_min/len(all_weights):.2f}%)")
+            print(f"  At max boundary: {at_max:,} ({100*at_max/len(all_weights):.2f}%)")
+
+        print("=" * 40)
 
     def evaluate_population(self, n_cores, show_progress=True):
          tasks = [(self.population[i],) + self.fitness_func_args for i in range(self.population_size)]

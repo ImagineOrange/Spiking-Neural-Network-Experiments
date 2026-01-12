@@ -846,3 +846,293 @@ def Layered_visualize_activity_layout_grid(network, pos, activity_record, dt=0.1
 
 # --- END CORRECTED/DYNAMIC Function ---
 
+
+def visualize_rich_club_distribution(network, save_path="rich_club_analysis.png"):
+    """
+    Visualize the rich club distribution and coefficient for a network.
+
+    Creates a comprehensive figure showing:
+    1. Degree distribution with rich club range highlighted
+    2. Rich club coefficient Φ(k) vs degree k
+    3. Network visualization highlighting rich club nodes
+    4. Connection matrix showing rich club connectivity
+
+    Parameters:
+    -----------
+    network : RichClubNeuronalNetwork
+        The network to analyze
+    save_path : str
+        Path to save the figure
+
+    Returns:
+    --------
+    dict
+        Dictionary containing analysis results and figure
+    """
+    print("\n=== Generating Rich Club Distribution Visualization ===")
+
+    # Check if this is a rich club network
+    if not hasattr(network, 'rich_club_nodes'):
+        print("Warning: Network does not have rich_club_nodes attribute. May not be a RichClubNeuronalNetwork.")
+        return {"success": False, "message": "Not a rich club network"}
+
+    # Get network graph
+    G = network.graph.to_undirected()
+
+    # Calculate degree distribution
+    degrees = dict(G.degree())
+    degree_sequence = sorted(degrees.values(), reverse=True)
+    degree_counts = {}
+    for deg in degree_sequence:
+        degree_counts[deg] = degree_counts.get(deg, 0) + 1
+
+    # Get rich club nodes and their properties
+    rich_club_nodes = network.rich_club_nodes
+    target_min, target_max = network.target_degree_range
+
+    # Calculate rich club coefficient if not already done
+    if not hasattr(network, 'rich_club_coefficients') or not network.rich_club_coefficients:
+        try:
+            rc = nx.rich_club_coefficient(G, normalized=False)
+            network.rich_club_coefficients = rc
+        except:
+            network.rich_club_coefficients = {}
+
+    rc = network.rich_club_coefficients
+
+    # Create figure with subplots
+    fig = plt.figure(figsize=(16, 12), facecolor='#1a1a1a')
+    gs = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
+
+    # --- SUBPLOT 1: Degree Distribution ---
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax1.set_facecolor('#0a0a0a')
+
+    degrees_list = list(degree_counts.keys())
+    counts_list = list(degree_counts.values())
+
+    colors = ['#ff6b6b' if target_min <= deg <= target_max else '#54a0ff'
+              for deg in degrees_list]
+
+    ax1.bar(degrees_list, counts_list, color=colors, edgecolor='white', linewidth=0.5, alpha=0.8)
+    ax1.axvspan(target_min, target_max, alpha=0.2, color='yellow', label='Rich Club Range')
+    ax1.set_xlabel('Degree (k)', fontsize=12, color='white')
+    ax1.set_ylabel('Number of Nodes', fontsize=12, color='white')
+    ax1.set_title('Degree Distribution', fontsize=14, fontweight='bold', color='white')
+    ax1.legend(fontsize=10)
+    ax1.grid(True, alpha=0.3)
+    ax1.tick_params(colors='white')
+
+    # Add statistics text
+    stats_text = f"Total nodes: {network.n_neurons}\n"
+    stats_text += f"Rich club nodes: {len(rich_club_nodes)} ({100*len(rich_club_nodes)/network.n_neurons:.1f}%)\n"
+    stats_text += f"Target range: k={target_min}-{target_max}"
+    ax1.text(0.95, 0.95, stats_text, transform=ax1.transAxes,
+             fontsize=10, verticalalignment='top', horizontalalignment='right',
+             bbox=dict(boxstyle='round', facecolor='#2a2a2a', alpha=0.8),
+             color='white')
+
+    # --- SUBPLOT 2: Rich Club Coefficient ---
+    ax2 = fig.add_subplot(gs[0, 1])
+    ax2.set_facecolor('#0a0a0a')
+
+    if rc:
+        k_values = sorted(rc.keys())
+        phi_values = [rc[k] for k in k_values]
+
+        # Color based on whether in rich club range
+        colors = ['#ff6b6b' if target_min <= k <= target_max else '#54a0ff'
+                  for k in k_values]
+
+        ax2.plot(k_values, phi_values, 'o-', color='#54a0ff', linewidth=2,
+                markersize=6, alpha=0.7, label='Φ(k)')
+
+        # Highlight rich club range
+        rc_k = [k for k in k_values if target_min <= k <= target_max]
+        rc_phi = [rc[k] for k in rc_k]
+        if rc_k:
+            ax2.plot(rc_k, rc_phi, 'o', color='#ff6b6b', markersize=10,
+                    label='Rich Club Range', zorder=5)
+
+        ax2.axhspan(0, 1, alpha=0.1, color='gray', label='Random baseline')
+        ax2.axhline(y=1, color='yellow', linestyle='--', linewidth=1.5,
+                   alpha=0.5, label='Φ(k) = 1')
+        ax2.axvspan(target_min, target_max, alpha=0.2, color='yellow')
+
+        ax2.set_xlabel('Degree (k)', fontsize=12, color='white')
+        ax2.set_ylabel('Rich Club Coefficient Φ(k)', fontsize=12, color='white')
+        ax2.set_title('Rich Club Coefficient', fontsize=14, fontweight='bold', color='white')
+        ax2.legend(fontsize=9)
+        ax2.grid(True, alpha=0.3)
+        ax2.tick_params(colors='white')
+
+        # Add rich club statistics
+        if rc_k:
+            mean_phi = np.mean(rc_phi)
+            rc_stats = f"Mean Φ(k) in range: {mean_phi:.3f}\n"
+            rc_stats += f"Φ_norm > 1: {'Yes' if mean_phi > 1 else 'No'}"
+            ax2.text(0.05, 0.95, rc_stats, transform=ax2.transAxes,
+                    fontsize=10, verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='#2a2a2a', alpha=0.8),
+                    color='white')
+    else:
+        ax2.text(0.5, 0.5, 'Rich club coefficient\nnot available',
+                transform=ax2.transAxes, ha='center', va='center',
+                fontsize=12, color='white')
+        ax2.set_title('Rich Club Coefficient (N/A)', fontsize=14, fontweight='bold', color='white')
+
+    # --- SUBPLOT 3: Network Visualization ---
+    ax3 = fig.add_subplot(gs[1, :])
+    ax3.set_facecolor('#0a0a0a')
+
+    # Get positions
+    pos = nx.get_node_attributes(network.graph, 'pos')
+    if not pos:
+        # Use spring layout with rich club nodes closer
+        pos = nx.spring_layout(G, k=0.5, iterations=50)
+
+    # Draw non-rich-club nodes
+    non_rc_nodes = [n for n in G.nodes() if n not in rich_club_nodes]
+    nx.draw_networkx_nodes(G, pos, nodelist=non_rc_nodes,
+                          node_color='#54a0ff', node_size=30, alpha=0.4, ax=ax3)
+
+    # Draw rich club nodes
+    nx.draw_networkx_nodes(G, pos, nodelist=rich_club_nodes,
+                          node_color='#ff6b6b', node_size=150, alpha=0.9,
+                          edgecolors='yellow', linewidths=2, ax=ax3)
+
+    # Draw edges (sample for visibility)
+    edges = list(G.edges())
+    if len(edges) > 5000:
+        edges_sample = random.sample(edges, 5000)
+    else:
+        edges_sample = edges
+
+    # Separate rich club edges from regular edges
+    rc_edges = [(u, v) for u, v in edges_sample
+                if u in rich_club_nodes and v in rich_club_nodes]
+    regular_edges = [(u, v) for u, v in edges_sample
+                     if not (u in rich_club_nodes and v in rich_club_nodes)]
+
+    # Draw regular edges
+    nx.draw_networkx_edges(G, pos, edgelist=regular_edges,
+                          edge_color='#54a0ff', alpha=0.05, width=0.3, ax=ax3)
+
+    # Draw rich club edges
+    nx.draw_networkx_edges(G, pos, edgelist=rc_edges,
+                          edge_color='#ff6b6b', alpha=0.3, width=1.5, ax=ax3)
+
+    ax3.set_title('Network Structure: Rich Club Nodes Highlighted',
+                 fontsize=14, fontweight='bold', color='white')
+    ax3.axis('off')
+
+    # Add legend
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor='#ff6b6b', edgecolor='yellow', label=f'Rich Club Nodes (n={len(rich_club_nodes)})'),
+        Patch(facecolor='#54a0ff', alpha=0.4, label='Regular Nodes'),
+        Patch(facecolor='#ff6b6b', alpha=0.3, label='Rich Club Edges')
+    ]
+    ax3.legend(handles=legend_elements, loc='upper right', fontsize=10)
+
+    # --- SUBPLOT 4: Connection Matrix ---
+    ax4 = fig.add_subplot(gs[2, 0])
+    ax4.set_facecolor('#0a0a0a')
+
+    # Create adjacency matrix for rich club nodes
+    if len(rich_club_nodes) > 0 and len(rich_club_nodes) <= 100:
+        rc_adj = np.zeros((len(rich_club_nodes), len(rich_club_nodes)))
+        rc_node_list = sorted(rich_club_nodes)
+        rc_node_idx = {node: i for i, node in enumerate(rc_node_list)}
+
+        for i, node_i in enumerate(rc_node_list):
+            for j, node_j in enumerate(rc_node_list):
+                if G.has_edge(node_i, node_j):
+                    rc_adj[i, j] = 1
+
+        im = ax4.imshow(rc_adj, cmap='hot', interpolation='nearest', aspect='auto')
+        ax4.set_xlabel('Rich Club Node Index', fontsize=12, color='white')
+        ax4.set_ylabel('Rich Club Node Index', fontsize=12, color='white')
+        ax4.set_title('Rich Club Connectivity Matrix', fontsize=14, fontweight='bold', color='white')
+        ax4.tick_params(colors='white')
+
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax4)
+        cbar.set_label('Connection', color='white')
+        cbar.ax.yaxis.set_tick_params(color='white')
+        plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white')
+
+        # Calculate connectivity density
+        density = np.sum(rc_adj) / (len(rich_club_nodes) * (len(rich_club_nodes) - 1))
+        ax4.text(0.05, 0.95, f"Density: {density:.3f}", transform=ax4.transAxes,
+                fontsize=10, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='#2a2a2a', alpha=0.8),
+                color='white')
+    else:
+        ax4.text(0.5, 0.5, f'Too many rich club nodes\nto display matrix\n(n={len(rich_club_nodes)})',
+                transform=ax4.transAxes, ha='center', va='center',
+                fontsize=12, color='white')
+        ax4.set_title('Rich Club Connectivity Matrix', fontsize=14, fontweight='bold', color='white')
+        ax4.axis('off')
+
+    # --- SUBPLOT 5: Degree vs Connections Statistics ---
+    ax5 = fig.add_subplot(gs[2, 1])
+    ax5.set_facecolor('#0a0a0a')
+
+    # Calculate edge density for each degree
+    degree_edge_density = {}
+    for k in sorted(set(degrees.values())):
+        nodes_with_k = [n for n, d in degrees.items() if d == k]
+        if len(nodes_with_k) > 1:
+            # Count edges between nodes of degree k
+            edges_between = sum(1 for u in nodes_with_k for v in nodes_with_k
+                              if u < v and G.has_edge(u, v))
+            max_possible = len(nodes_with_k) * (len(nodes_with_k) - 1) / 2
+            density = edges_between / max_possible if max_possible > 0 else 0
+            degree_edge_density[k] = density
+
+    if degree_edge_density:
+        k_vals = sorted(degree_edge_density.keys())
+        density_vals = [degree_edge_density[k] for k in k_vals]
+
+        colors = ['#ff6b6b' if target_min <= k <= target_max else '#54a0ff'
+                  for k in k_vals]
+
+        ax5.bar(k_vals, density_vals, color=colors, edgecolor='white',
+               linewidth=0.5, alpha=0.8)
+        ax5.axvspan(target_min, target_max, alpha=0.2, color='yellow')
+        ax5.set_xlabel('Degree (k)', fontsize=12, color='white')
+        ax5.set_ylabel('Intra-degree Edge Density', fontsize=12, color='white')
+        ax5.set_title('Edge Density Among Same-Degree Nodes',
+                     fontsize=14, fontweight='bold', color='white')
+        ax5.grid(True, alpha=0.3)
+        ax5.tick_params(colors='white')
+    else:
+        ax5.text(0.5, 0.5, 'Insufficient data\nfor edge density',
+                transform=ax5.transAxes, ha='center', va='center',
+                fontsize=12, color='white')
+
+    # Save figure
+    plt.savefig(save_path, dpi=300, facecolor='#1a1a1a', bbox_inches='tight')
+    print(f"Rich club visualization saved to {save_path}")
+
+    # Prepare results
+    results = {
+        "success": True,
+        "figure": fig,
+        "rich_club_nodes": rich_club_nodes,
+        "rich_club_count": len(rich_club_nodes),
+        "target_range": network.target_degree_range,
+        "rich_club_coefficients": rc,
+        "degree_distribution": degree_counts,
+        "edge_density_by_degree": degree_edge_density
+    }
+
+    if rc and any(target_min <= k <= target_max for k in rc.keys()):
+        rc_range_phi = [rc[k] for k in rc.keys() if target_min <= k <= target_max]
+        results["mean_phi_in_range"] = np.mean(rc_range_phi)
+        results["has_rich_club_structure"] = results["mean_phi_in_range"] > 1.0
+
+    plt.close(fig)
+    return results
+

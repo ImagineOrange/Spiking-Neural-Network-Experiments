@@ -33,6 +33,11 @@ class LayeredNeuronalNetworkVectorized:
         self.delays = np.zeros((n_neurons, n_neurons))
         self.neuron_grid_positions = {} # Store positions if needed for visualization
 
+        # --- Inhibitory Pairing Metadata (for 1:1 WTA) ---
+        self.inhibitory_pairing = {}  # {exc_idx: inh_idx} mapping
+        self.excitatory_neurons_indices = []  # List of excitatory neuron indices
+        self.dedicated_inhibitory_indices = []  # List of dedicated inhibitory neuron indices
+
         # --- Neuron Parameters (Store as NumPy arrays) ---
         # Fetch parameters from kwargs, defaulting to typical values or raising errors
         # Allows for uniform (scalar) or heterogeneous (array) parameters
@@ -75,6 +80,11 @@ class LayeredNeuronalNetworkVectorized:
         self.t_since_spike = np.full(n_neurons, self.tau_ref + 1e-5, dtype=float)
         self.external_stim_g = np.zeros(n_neurons, dtype=float) # For direct stimulation
 
+        # --- Adaptive Threshold State (for preventing runaway activity) ---
+        self.theta = np.zeros(n_neurons, dtype=float)  # Adaptive threshold offset
+        self.tau_theta = np.full(n_neurons, 1e7, dtype=float)  # Very slow decay time constant (ms)
+        self.theta_plus = np.full(n_neurons, 0.05, dtype=float)  # Threshold increment per spike (mV)
+
         # --- Simulation State ---
         self.spike_queue = deque()
         self.network_activity = [] # Records indices of active neurons per time step
@@ -84,6 +94,29 @@ class LayeredNeuronalNetworkVectorized:
         self.avalanche_durations = []
         self.current_avalanche_size = 0
         self.current_avalanche_start = None
+
+        # --- STDP State Variables ---
+        self.trace_pre = np.zeros(n_neurons, dtype=float)  # Pre-synaptic traces
+        self.trace_post = np.zeros(n_neurons, dtype=float)  # Post-synaptic traces
+        self.stdp_enabled = False  # Flag to enable/disable STDP
+        self.learning_phase = False  # Flag to track if in learning window
+        self.current_target_class = None  # Target class for supervised learning
+        self.last_prediction_correct = None  # Whether last prediction was correct
+        self.stdp_weight_deltas = {}  # Accumulator for weight changes: {(u,v): delta_w}
+
+        # --- Eligibility Traces (for reward-modulated STDP) ---
+        self.eligibility_traces = {}  # {(pre, post): trace_value} - potential weight changes
+        self.tau_eligibility = 20.0  # Eligibility trace decay time constant (ms)
+        self.reward_signal = 0.0  # Current reward signal (+1 correct, -1 incorrect, 0 neutral)
+
+        # STDP parameters (can be set externally)
+        self.stdp_a_plus = 0.001  # LTP learning rate
+        self.stdp_a_minus = 0.0012  # LTD learning rate (slightly larger)
+        self.stdp_tau_pre = 20.0  # Pre-synaptic trace time constant (ms)
+        self.stdp_tau_post = 20.0  # Post-synaptic trace time constant (ms)
+        self.stdp_w_min = 0.002  # Minimum weight (match GA bounds)
+        self.stdp_w_max = 0.35  # Maximum weight (match GA bounds)
+        self.stdp_x_target = 0.0  # CHANGED TO 0.0 FOR DIEHL PURE HEBBIAN STDP (was 0.1)
 
 
     def add_connection(self, u, v, weight, delay=1.0):
@@ -119,6 +152,20 @@ class LayeredNeuronalNetworkVectorized:
         self.current_avalanche_size = 0
         self.current_avalanche_start = None
         self.spike_queue = deque()
+
+        # Reset STDP state
+        self.trace_pre.fill(0.0)
+        self.trace_post.fill(0.0)
+        self.stdp_weight_deltas = {}
+        self.stdp_enabled = False
+        self.learning_phase = False
+
+        # Reset adaptive thresholds
+        self.theta.fill(0.0)
+
+        # Reset eligibility traces
+        self.eligibility_traces = {}
+        self.reward_signal = 0.0
 
     def set_external_stimulus(self, neuron_indices, conductance_values):
         """Applies external stimulus conductance to specified neurons."""
@@ -206,6 +253,31 @@ class LayeredNeuronalNetworkVectorized:
         self.g_i *= exp_decay_i
         self.adaptation *= exp_decay_adapt
 
+        # --- 3.5. Decay Adaptive Thresholds (Vectorized) ---
+        # Decay with very slow time constant (tau_theta = 1e7 ms ~ 166 minutes)
+        exp_decay_theta = np.exp(-dt / np.where(self.tau_theta > 1e-9, self.tau_theta, 1e-9))
+        self.theta *= exp_decay_theta
+
+        # --- 3.6. Decay STDP Traces (Vectorized) ---
+        if hasattr(self, 'trace_pre'):  # Check if STDP variables exist
+            exp_decay_pre = np.exp(-dt / max(1e-9, self.stdp_tau_pre))
+            exp_decay_post = np.exp(-dt / max(1e-9, self.stdp_tau_post))
+            self.trace_pre *= exp_decay_pre
+            self.trace_post *= exp_decay_post
+
+        # --- 3.7. Decay Eligibility Traces (Vectorized) ---
+        if hasattr(self, 'eligibility_traces') and self.eligibility_traces:
+            exp_decay_elig = np.exp(-dt / max(1e-9, self.tau_eligibility))
+
+            # Decay all eligibility traces
+            decayed_traces = {}
+            for key, value in self.eligibility_traces.items():
+                decayed_value = value * exp_decay_elig
+                if abs(decayed_value) > 1e-9:  # Keep only significant traces
+                    decayed_traces[key] = decayed_value
+
+            self.eligibility_traces = decayed_traces
+
         # Apply synaptic noise (after decay, before spike check)
         if np.any(self.i_noise_amp > 0):
             # Calculate noise scaled by sqrt(dt)
@@ -222,8 +294,10 @@ class LayeredNeuronalNetworkVectorized:
 
 
         # --- 4. Spike Detection & Post-Spike Updates (Vectorized) ---
-        # Neurons spike if voltage reaches threshold AND they are not refractory
-        spiked_mask = (self.v >= self.v_threshold) & non_refractory_mask
+        # Neurons spike if voltage reaches ADAPTIVE threshold AND they are not refractory
+        # Effective threshold = base threshold + adaptive component
+        effective_threshold = self.v_threshold + self.theta
+        spiked_mask = (self.v >= effective_threshold) & non_refractory_mask
         active_indices = np.where(spiked_mask)[0]
 
         if active_indices.size > 0:
@@ -233,6 +307,35 @@ class LayeredNeuronalNetworkVectorized:
              self.t_since_spike[spiked_mask] = 0.0
              # Update adaptation for spiking neurons
              self.adaptation[spiked_mask] += self.adaptation_increment[spiked_mask]
+
+             # Increase adaptive threshold for spiking neurons (prevents runaway activity)
+             self.theta[spiked_mask] += self.theta_plus[spiked_mask]
+
+             # --- STDP: Update traces and accumulate weight changes ---
+             if hasattr(self, 'learning_phase') and self.learning_phase:
+                 # Update pre-synaptic traces for spiking neurons (always during learning_phase)
+                 self.trace_pre[active_indices] += 1.0
+
+                 # DEBUG: Track accumulation (only first example in session)
+                 if not hasattr(self, '_debug_accumulation_shown'):
+                     self._debug_accumulation_shown = False
+                 n_elig_before = len(self.eligibility_traces)
+
+                 # Accumulate STDP weight changes based on current traces
+                 # This happens during input/readout when neurons are spiking
+                 self._accumulate_stdp_updates(active_indices)
+
+                 # DEBUG: Show first accumulation
+                 if not self._debug_accumulation_shown:
+                     n_elig_after = len(self.eligibility_traces)
+                     if n_elig_after > n_elig_before:
+                         print(f"[DEBUG ACCUMULATE] First eligibility trace accumulation: "
+                               f"{n_elig_before} → {n_elig_after} traces, "
+                               f"{len(active_indices)} neurons spiked")
+                         self._debug_accumulation_shown = True
+
+                 # Update post-synaptic traces for spiking neurons (for future pre-synaptic events)
+                 self.trace_post[active_indices] += 1.0
 
         # --- 5. Queue New Spikes ---
         if active_indices.size > 0:
@@ -331,3 +434,355 @@ class LayeredNeuronalNetworkVectorized:
                      self.graph[u][v]['weight'] = final_weight
              else:
                  print(f"Warning: Invalid index ({u},{v}) during set_weights_sparse.")
+
+    # --- STDP Methods ---
+
+    def _accumulate_eligibility_traces(self, spiking_neurons):
+        """
+        Accumulate eligibility traces (potential weight changes) when neurons spike.
+
+        REWARD-MODULATED STDP:
+        Eligibility traces record what WOULD change based on spike timing,
+        but actual weight changes only occur when a reward signal is applied.
+
+        This implements the three-factor learning rule:
+        ΔW = reward × eligibility × weight_dependence
+
+        Args:
+            spiking_neurons (np.ndarray): Indices of neurons that just spiked
+        """
+        if not self.learning_phase:
+            return
+
+        # Get learning rates
+        a_plus = self.stdp_a_plus
+        a_minus = self.stdp_a_minus
+        x_tar = self.stdp_x_target  # Pre-synaptic trace target
+
+        for post_idx in spiking_neurons:
+            # Post-synaptic neuron just spiked
+            # LTP eligibility: proportional to (pre-synaptic trace - target)
+            if post_idx in self.graph:
+                for pre_idx in self.graph.predecessors(post_idx):
+                    if pre_idx < self.n_neurons:
+                        # LTP rule with pre-synaptic target: Δw ∝ (x_pre - x_tar)
+                        # This provides stability - synapses from inactive pre-neurons are weakened
+                        if self.trace_pre[pre_idx] > 0 or x_tar > 0:
+                            eligibility_ltp = a_plus * (self.trace_pre[pre_idx] - x_tar)
+
+                            # Accumulate eligibility (NOT weight change yet!)
+                            key = (pre_idx, post_idx)
+                            self.eligibility_traces[key] = self.eligibility_traces.get(key, 0.0) + eligibility_ltp
+
+            # Pre-synaptic neuron just spiked
+            # LTD eligibility: proportional to post-synaptic trace
+            if post_idx in self.graph:
+                for target_idx in self.graph.successors(post_idx):
+                    if target_idx < self.n_neurons:
+                        # LTD: standard depression based on post-synaptic trace
+                        if self.trace_post[target_idx] > 0:
+                            eligibility_ltd = -a_minus * self.trace_post[target_idx]
+
+                            # Accumulate eligibility (NOT weight change yet!)
+                            key = (post_idx, target_idx)
+                            self.eligibility_traces[key] = self.eligibility_traces.get(key, 0.0) + eligibility_ltd
+
+    def _accumulate_stdp_updates(self, spiking_neurons):
+        """
+        DEPRECATED: Legacy name for backward compatibility.
+        Now delegates to _accumulate_eligibility_traces().
+        """
+        self._accumulate_eligibility_traces(spiking_neurons)
+
+    def apply_reward_modulated_stdp(self, reward_signal):
+        """
+        Apply accumulated eligibility traces modulated by reward signal.
+
+        REWARD-MODULATED STDP (Three-Factor Learning):
+        ΔW = reward × eligibility × weight_dependence
+
+        This implements dopamine-modulated plasticity where:
+        - Correct prediction (reward=+1): Strengthen connections that contributed
+        - Incorrect prediction (reward=-1): Weaken (anti-STDP) those connections
+        - No prediction/neutral (reward=0): No learning
+
+        Args:
+            reward_signal (float): +1.0 (correct), -1.0 (incorrect), 0.0 (neutral)
+        """
+        if not self.eligibility_traces:
+            return
+
+        for (pre_idx, post_idx), eligibility in self.eligibility_traces.items():
+            if 0 <= pre_idx < self.n_neurons and 0 <= post_idx < self.n_neurons:
+                current_weight = self.weights[pre_idx, post_idx]
+                is_inhibitory_conn = self.is_inhibitory[pre_idx]
+                current_magnitude = abs(current_weight)
+
+                # Apply weight-dependent factor (multiplicative STDP)
+                if eligibility > 0:  # LTP component
+                    weight_dependent_factor = (self.stdp_w_max - current_magnitude)
+                else:  # LTD component
+                    weight_dependent_factor = (current_magnitude - self.stdp_w_min)
+
+                # Final weight change: reward × eligibility × weight_dependence
+                actual_delta = reward_signal * eligibility * weight_dependent_factor
+
+                # Update magnitude
+                new_magnitude = current_magnitude + actual_delta
+                new_magnitude = np.clip(new_magnitude, self.stdp_w_min, self.stdp_w_max)
+
+                # Restore sign based on source neuron type
+                if is_inhibitory_conn:
+                    new_weight = -new_magnitude
+                else:
+                    new_weight = new_magnitude
+
+                # Update weight
+                self.weights[pre_idx, post_idx] = new_weight
+
+                # Update graph if edge exists
+                if self.graph.has_edge(pre_idx, post_idx):
+                    self.graph[pre_idx][post_idx]['weight'] = new_weight
+
+        # Clear eligibility traces after applying reward
+        self.eligibility_traces = {}
+
+    def apply_unsupervised_stdp(self):
+        """
+        Apply DIRECT unsupervised STDP updates (Diehl & Cook style).
+
+        Unlike reward-modulated STDP, this applies weight changes immediately
+        based on accumulated eligibility traces WITHOUT a reward signal.
+        This is classical Hebbian STDP where timing alone determines plasticity.
+
+        Diehl & Cook use ADDITIVE STDP where eligibility directly becomes weight change:
+        ΔW = eligibility (already includes A+/A- learning rates)
+
+        The weight-dependence is implicitly handled by homeostatic normalization
+        which rescales weights after each update.
+
+        Used in: Diehl & Cook 2015 unsupervised learning
+        """
+        if not self.eligibility_traces:
+            return
+
+        for (pre_idx, post_idx), eligibility in self.eligibility_traces.items():
+            if 0 <= pre_idx < self.n_neurons and 0 <= post_idx < self.n_neurons:
+                current_weight = self.weights[pre_idx, post_idx]
+                is_inhibitory_conn = self.is_inhibitory[pre_idx]
+                current_magnitude = abs(current_weight)
+
+                # ADDITIVE STDP: eligibility directly becomes weight change
+                # (eligibility already contains A+ or A- learning rate)
+                actual_delta = eligibility
+
+                # Update magnitude
+                new_magnitude = current_magnitude + actual_delta
+                new_magnitude = np.clip(new_magnitude, self.stdp_w_min, self.stdp_w_max)
+
+                # Restore sign based on source neuron type
+                if is_inhibitory_conn:
+                    new_weight = -new_magnitude
+                else:
+                    new_weight = new_magnitude
+
+                # Update weight
+                self.weights[pre_idx, post_idx] = new_weight
+
+                # Update graph if edge exists
+                if self.graph.has_edge(pre_idx, post_idx):
+                    self.graph[pre_idx][post_idx]['weight'] = new_weight
+
+        # Clear eligibility traces after applying
+        self.eligibility_traces = {}
+
+    def apply_stdp_updates(self, true_label=None, output_layer_range=None):
+        """
+        DEPRECATED: Legacy method for backward compatibility.
+
+        For new code, use apply_reward_modulated_stdp() instead.
+        This method converts the old API to the new reward-modulated approach.
+
+        Args:
+            true_label: Ground truth class label (optional, for supervised learning)
+            output_layer_range: Tuple (start_idx, end_idx) of output layer neurons
+        """
+        # Legacy compatibility: use old stdp_weight_deltas if they exist
+        if self.stdp_weight_deltas:
+            # Old-style STDP - apply deltas directly with reward=+1
+            for (pre_idx, post_idx), delta_w in self.stdp_weight_deltas.items():
+                if 0 <= pre_idx < self.n_neurons and 0 <= post_idx < self.n_neurons:
+                    current_weight = self.weights[pre_idx, post_idx]
+                    is_inhibitory_conn = self.is_inhibitory[pre_idx]
+                    current_magnitude = abs(current_weight)
+
+                    new_magnitude = current_magnitude + delta_w
+                    new_magnitude = np.clip(new_magnitude, self.stdp_w_min, self.stdp_w_max)
+
+                    if is_inhibitory_conn:
+                        new_weight = -new_magnitude
+                    else:
+                        new_weight = new_magnitude
+
+                    self.weights[pre_idx, post_idx] = new_weight
+                    if self.graph.has_edge(pre_idx, post_idx):
+                        self.graph[pre_idx][post_idx]['weight'] = new_weight
+
+            self.stdp_weight_deltas = {}
+        else:
+            # New-style: use reward-modulated STDP
+            # Assume correct if called without explicit reward signal
+            self.apply_reward_modulated_stdp(reward_signal=1.0)
+
+    def apply_anti_stdp_updates(self, true_label=None, predicted_label=None, output_layer_range=None):
+        """
+        Legacy method for backward compatibility.
+        Now delegates to apply_stdp_updates with supervised learning parameters.
+
+        This method is kept for compatibility but the supervised logic is now
+        in apply_stdp_updates() which handles both correct and incorrect cases.
+
+        Note: predicted_label parameter is ignored in simplified version.
+        """
+        # Just call the unified supervised STDP method (predicted_label no longer used)
+        self.apply_stdp_updates(true_label, output_layer_range)
+
+    def apply_homeostatic_normalization(self, connection_map=None, target_sum_per_neuron=None):
+        """
+        Apply homeostatic normalization: normalize incoming weight sum per neuron.
+        Implements synaptic scaling - a biologically inspired mechanism.
+
+        Args:
+            connection_map (list of tuples): List of (source, target) connections.
+                                             If None, uses all non-zero weights.
+            target_sum_per_neuron (float or dict): Target sum of incoming weights.
+                                                   If float, same for all neurons.
+                                                   If dict, maps neuron_idx -> target_sum.
+                                                   If None, maintains current average sum.
+        """
+        # Build incoming connections per neuron
+        incoming_weights = {i: [] for i in range(self.n_neurons)}
+
+        if connection_map is not None:
+            # Use provided connection map
+            for pre_idx, post_idx in connection_map:
+                if 0 <= pre_idx < self.n_neurons and 0 <= post_idx < self.n_neurons:
+                    w = self.weights[pre_idx, post_idx]
+                    if w != 0:
+                        incoming_weights[post_idx].append((pre_idx, abs(w)))
+        else:
+            # Use all non-zero weights
+            for post_idx in range(self.n_neurons):
+                for pre_idx in range(self.n_neurons):
+                    w = self.weights[pre_idx, post_idx]
+                    if w != 0:
+                        incoming_weights[post_idx].append((pre_idx, abs(w)))
+
+        # Normalize each neuron's incoming weights
+        for post_idx in range(self.n_neurons):
+            connections = incoming_weights[post_idx]
+            if not connections:
+                continue
+
+            # Calculate current sum
+            current_sum = sum(w for _, w in connections)
+            if current_sum < 1e-9:
+                continue
+
+            # Determine target sum
+            if target_sum_per_neuron is None:
+                # Maintain current sum
+                target_sum = current_sum
+            elif isinstance(target_sum_per_neuron, dict):
+                target_sum = target_sum_per_neuron.get(post_idx, current_sum)
+            else:
+                target_sum = float(target_sum_per_neuron)
+
+            # Calculate scaling factor
+            scale_factor = target_sum / current_sum
+
+            # Apply scaling to all incoming weights
+            for pre_idx, _ in connections:
+                current_weight = self.weights[pre_idx, post_idx]
+                is_inhibitory_conn = self.is_inhibitory[pre_idx]
+
+                # Scale magnitude
+                new_magnitude = abs(current_weight) * scale_factor
+
+                # Clip to bounds
+                new_magnitude = np.clip(new_magnitude, self.stdp_w_min, self.stdp_w_max)
+
+                # Restore sign
+                if is_inhibitory_conn:
+                    new_weight = -new_magnitude
+                else:
+                    new_weight = new_magnitude
+
+                # Update weight
+                self.weights[pre_idx, post_idx] = new_weight
+
+                # Update graph if edge exists
+                if self.graph.has_edge(pre_idx, post_idx):
+                    self.graph[pre_idx][post_idx]['weight'] = new_weight
+
+    def reset_transient_state(self):
+        """
+        Reset transient state between digit windows, preserving weights and structure.
+        Resets: voltages, conductances, traces, spike queue, activity records.
+        Preserves: weights, connections, positions, delays, is_inhibitory.
+        """
+        # Reset neuronal state
+        self.v[:] = self.v_rest
+        self.g_e.fill(0.0)
+        self.g_i.fill(0.0)
+        self.adaptation.fill(0.0)
+        self.t_since_spike[:] = self.tau_ref + 1e-5
+        self.external_stim_g.fill(0.0)
+
+        # Reset spike queue and activity
+        self.spike_queue = deque()
+        self.network_activity = []
+
+        # Reset STDP traces
+        if hasattr(self, 'trace_pre'):
+            self.trace_pre.fill(0.0)
+            self.trace_post.fill(0.0)
+            self.stdp_weight_deltas = {}
+
+        # Reset avalanche tracking
+        self.current_avalanche_size = 0
+        self.current_avalanche_start = None
+
+        # Note: Do NOT reset:
+        # - self.weights
+        # - self.delays
+        # - self.graph
+        # - self.is_inhibitory
+        # - self.neuron_grid_positions
+        # - self.avalanche_sizes / durations (cumulative metrics)
+
+    def set_stdp_params(self, a_plus=None, a_minus=None, tau_pre=None, tau_post=None,
+                        w_min=None, w_max=None):
+        """
+        Set STDP parameters.
+
+        Args:
+            a_plus (float): LTP learning rate
+            a_minus (float): LTD learning rate
+            tau_pre (float): Pre-synaptic trace time constant (ms)
+            tau_post (float): Post-synaptic trace time constant (ms)
+            w_min (float): Minimum weight magnitude
+            w_max (float): Maximum weight magnitude
+        """
+        if a_plus is not None:
+            self.stdp_a_plus = a_plus
+        if a_minus is not None:
+            self.stdp_a_minus = a_minus
+        if tau_pre is not None:
+            self.stdp_tau_pre = tau_pre
+        if tau_post is not None:
+            self.stdp_tau_post = tau_post
+        if w_min is not None:
+            self.stdp_w_min = w_min
+        if w_max is not None:
+            self.stdp_w_max = w_max
