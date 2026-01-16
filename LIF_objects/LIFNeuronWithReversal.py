@@ -10,10 +10,11 @@ class LIFNeuronWithReversal:
     - Membrane potential noise and synaptic input noise
     - Spike-frequency adaptation to prevent tonic firing
     """
-    def __init__(self, v_rest=-65.0, v_threshold=-55.0, v_reset=-75.0, 
+    def __init__(self, v_rest=-65.0, v_threshold=-55.0, v_reset=-75.0,
                  tau_m=10.0, tau_ref=2.0, tau_e=3.0, tau_i=7.0, is_inhibitory=False,
-                 e_reversal=0.0, i_reversal=-70.0, v_noise_amp=0.5, i_noise_amp=0.05,
-                 adaptation_increment=0.5, tau_adaptation=100.0):
+                 e_reversal=0.0, i_reversal=-70.0, k_reversal=-90.0,
+                 v_noise_amp=0.5, i_noise_amp=0.05,
+                 adaptation_increment=0.3, tau_adaptation=100.0):
         # Membrane parameters
         self.v_rest = v_rest          # Resting potential (mV)
         self.v_threshold = v_threshold  # Threshold potential (mV)
@@ -28,6 +29,7 @@ class LIFNeuronWithReversal:
         # Reversal potentials
         self.e_reversal = e_reversal  # Excitatory reversal potential (mV)
         self.i_reversal = i_reversal  # Inhibitory reversal potential (mV)
+        self.k_reversal = k_reversal  # Potassium reversal potential for adaptation (mV)
         
         # Noise parameters
         self.v_noise_amp = v_noise_amp  # Membrane potential noise amplitude (mV)
@@ -116,10 +118,14 @@ class LIFNeuronWithReversal:
         i_e = self.g_e * (self.e_reversal - self.v)  # Excitatory current
         i_i = self.g_i * (self.i_reversal - self.v)  # Inhibitory current
         i_total = i_e + i_i
-        
+
+        # Calculate adaptation current with potassium reversal potential
+        # Models calcium-activated potassium channels (e.g., SK, BK channels)
+        # Current goes to zero as V approaches E_K (~-90 mV), preventing unrealistic hyperpolarization
+        i_adaptation = self.adaptation * (self.k_reversal - self.v)
+
         # Integrate membrane potential (leaky integration with conductance-based inputs)
-        # The adaptation current is subtracted here, acting as an additional hyperpolarizing current
-        dv = dt * ((-(self.v - self.v_rest) / self.tau_m) + i_total - self.adaptation) + v_noise
+        dv = dt * ((-(self.v - self.v_rest) / self.tau_m) + i_total + i_adaptation) + v_noise
         self.v += dv
         
         # Add synaptic conductance noise

@@ -62,7 +62,7 @@ class LayeredNeuronalNetworkVectorized:
         self.i_reversal = get_param('i_reversal', -70.0)
         self.v_noise_amp = get_param('v_noise_amp', 0.5)
         self.i_noise_amp = get_param('i_noise_amp', 0.05)
-        self.adaptation_increment = get_param('adaptation_increment', 0.5)
+        self.adaptation_increment = get_param('adaptation_increment', 0.3)
         self.tau_adaptation = get_param('tau_adaptation', 100.0)
 
         # Inhibitory status (must be provided as a boolean array/list)

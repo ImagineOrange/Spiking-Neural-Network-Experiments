@@ -8,14 +8,14 @@ class Layered_LIFNeuronWithReversal:
     - Reversal potentials (e_reversal, i_reversal) for synaptic currents.
     - Membrane potential noise (v_noise_amp).
     - Synaptic input noise (i_noise_amp).
-    - Spike-frequency adaptation (adaptation_increment, tau_adaptation).
+    - Spike-frequency adaptation via conductance-based K+ current (adaptation_increment, tau_adaptation, e_k_reversal).
     - Refractory period (tau_ref).
     - External stimulation via conductance change (external_stim_g).
     """
     def __init__(self, v_rest=-65.0, v_threshold=-55.0, v_reset=-75.0,
                  tau_m=10.0, tau_ref=2.0, tau_e=3.0, tau_i=7.0, is_inhibitory=False,
                  e_reversal=0.0, i_reversal=-70.0, v_noise_amp=0.5, i_noise_amp=0.05,
-                 adaptation_increment=0.5, tau_adaptation=100.0):
+                 adaptation_increment=0.3, tau_adaptation=100.0, e_k_reversal=-90.0):
         """
         Initializes the LIF neuron with specified parameters.
 
@@ -32,8 +32,9 @@ class Layered_LIFNeuronWithReversal:
             i_reversal (float): Reversal potential for inhibitory synapses (mV).
             v_noise_amp (float): Amplitude (std dev) of Gaussian noise added to membrane potential (mV).
             i_noise_amp (float): Amplitude (std dev) of Gaussian noise added to conductances.
-            adaptation_increment (float): Amount added to adaptation current after each spike.
-            tau_adaptation (float): Time constant for the decay of the adaptation current (ms).
+            adaptation_increment (float): Amount added to adaptation conductance (g_adapt) after each spike.
+            tau_adaptation (float): Time constant for the decay of the adaptation conductance (ms).
+            e_k_reversal (float): Reversal potential for potassium (adaptation) current (mV).
         """
         # Membrane properties
         self.v_rest = v_rest
@@ -55,12 +56,13 @@ class Layered_LIFNeuronWithReversal:
         # Adaptation properties
         self.adaptation_increment = adaptation_increment
         self.tau_adaptation = tau_adaptation
+        self.e_k_reversal = e_k_reversal  # K+ reversal potential for conductance-based adaptation
 
         # State variables initialized
         self.v = v_rest               # Current membrane potential
         self.g_e = 0.0                # Current excitatory conductance
         self.g_i = 0.0                # Current inhibitory conductance
-        self.adaptation = 0.0         # Current adaptation strength
+        self.adaptation = 0.0         # Current adaptation conductance (g_adapt, not a current)
         self.t_since_spike = tau_ref  # Time elapsed since the last spike (initialized outside refractory period)
         self.is_inhibitory = is_inhibitory # Neuron type
         self.layer = None             # Placeholder for layer assignment (if used in a layered network)
@@ -136,9 +138,20 @@ class Layered_LIFNeuronWithReversal:
         # Add membrane potential noise (scaled by sqrt(dt))
         v_noise = np.random.normal(0, self.v_noise_amp * np.sqrt(dt)) if self.v_noise_amp > 0 else 0
 
-        # Calculate change in membrane potential using the LIF equation with adaptation
+        # Calculate adaptation current using conductance-based formulation
+        # I_adapt = g_adapt * (E_K - V), where E_K ~ -90mV
+        # This is biophysically accurate: adaptation current cannot pull V below E_K
+        i_adapt = self.adaptation * (self.e_k_reversal - self.v)
+
+        # Calculate change in membrane potential using the LIF equation with conductance-based adaptation
+        # dv/dt = (-(V - V_rest) / tau_m) + I_syn + I_adapt + noise
+        # Note: I_adapt is negative (hyperpolarizing) when V > E_K, which is always true in normal operation
+        dv = dt * ((-(self.v - self.v_rest) / self.tau_m) + i_syn + i_adapt) + v_noise
+
+        # OLD SUBTRACTIVE ADAPTATION (commented out):
         # dv/dt = (-(V - V_rest) / tau_m) + I_syn - I_adaptation + noise
-        dv = dt * ((-(self.v - self.v_rest) / self.tau_m) + i_syn - self.adaptation) + v_noise
+        # This could drive V below any reversal potential, which is not biophysically realistic
+        # dv = dt * ((-(self.v - self.v_rest) / self.tau_m) + i_syn - self.adaptation) + v_noise
         # Update membrane potential
         self.v += dv
 
@@ -154,15 +167,15 @@ class Layered_LIFNeuronWithReversal:
             self.g_e = max(0, self.g_e + e_noise)
             self.g_i = max(0, self.g_i + i_noise)
 
-        # --- Adaptation Decay ---
-        # Decay adaptation current exponentially
+        # --- Adaptation Conductance Decay ---
+        # Decay adaptation conductance exponentially (models Ca2+-activated K+ channel dynamics)
         self.adaptation *= np.exp(-dt / self.tau_adaptation)
 
         # --- Spike Detection ---
         if self.v >= self.v_threshold:
             self.v = self.v_reset # Reset potential
             self.t_since_spike = 0.0 # Reset time since spike (enter refractory period)
-            self.adaptation += self.adaptation_increment # Increase adaptation current
+            self.adaptation += self.adaptation_increment # Increase adaptation conductance (g_adapt)
             self.spike_times.append(len(self.v_history) * dt) # Record spike time
             return True # Neuron spiked
 
