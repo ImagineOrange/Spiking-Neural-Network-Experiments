@@ -53,18 +53,6 @@ class LayeredNeuronalNetwork:
         self.distance_lambda = kwargs.get('distance_lambda', 0.1) # Distance decay factor for weights/delays
         self.weight_scale = kwargs.get('weight_scale', 0.1) # Base scale for weights
 
-        # STD (Short-Term Depression) parameters
-        self.std_enabled = kwargs.get('std_enabled', False)
-        self.U = kwargs.get('U', 0.3)  # Utilization factor
-        self.tau_d = kwargs.get('tau_d', 400.0)  # Recovery time constant (ms)
-
-        # Initialize STD synaptic resources if enabled
-        if self.std_enabled:
-            # All synapses start with full resources (x = 1.0)
-            self.x_resources = np.ones((n_neurons, n_neurons))
-        else:
-            self.x_resources = None
-
     def add_neuron(self, neuron, node_id, pos, layer):
         """
         Adds a pre-initialized neuron object to the network.
@@ -146,10 +134,6 @@ class LayeredNeuronalNetwork:
         self.current_avalanche_start = None
         self.spike_queue = deque() # Clear the spike queue
 
-        # Reset STD resources if enabled
-        if self.std_enabled and self.x_resources is not None:
-            self.x_resources = np.ones((self.n_neurons, self.n_neurons))
-
     def update_network(self, dt):
         """
         Updates the entire network state for one time step 'dt'.
@@ -191,33 +175,13 @@ class LayeredNeuronalNetwork:
                      # Check if target neuron index is valid and connection exists with non-zero weight
                      if j < self.n_neurons and self.graph.has_edge(i, j) and self.weights[i, j] != 0:
                              weight = self.weights[i, j]
-
-                             # Apply Short-Term Depression if enabled
-                             if self.std_enabled and self.x_resources is not None:
-                                 # Current available resources for this synapse
-                                 x = self.x_resources[i, j]
-                                 # Effective weight after depression
-                                 weight = weight * self.U * x
-                                 # Update resources: some are used, rest recover
-                                 self.x_resources[i, j] = x - self.U * x
-
                              # Use stored delay, ensuring it's at least dt
                              delay = self.delays[i, j] if self.delays[i,j] > 0 else dt
                              delivery_time = current_time + delay # Calculate when spike arrives
                              # Add spike details to the queue
                              self.spike_queue.append((delivery_time, i, j, weight))
 
-        # --- 4. Recover STD resources ---
-        # If STD is enabled, allow synaptic resources to recover over time
-        if self.std_enabled and self.x_resources is not None:
-            # Recovery follows: dx/dt = (1 - x) / tau_d
-            # Using forward Euler: x(t+dt) = x(t) + dt * (1 - x(t)) / tau_d
-            recovery_rate = dt / self.tau_d
-            self.x_resources += recovery_rate * (1.0 - self.x_resources)
-            # Clamp to [0, 1] to avoid numerical issues
-            self.x_resources = np.clip(self.x_resources, 0.0, 1.0)
-
-        # --- 5. Maintain sorted spike queue ---
+        # --- 4. Maintain sorted spike queue ---
         # If new spikes were added, re-sort the queue by delivery time
         if active_indices:
             self.spike_queue = deque(sorted(self.spike_queue, key=lambda x: x[0]))

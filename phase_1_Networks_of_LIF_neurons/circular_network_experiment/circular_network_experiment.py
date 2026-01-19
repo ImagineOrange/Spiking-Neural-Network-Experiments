@@ -1,26 +1,133 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 import sys
+import json
 from pathlib import Path
+from datetime import datetime
 
 # Add project root to path for imports
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-# Set dark style for all plots
-plt.style.use('dark_background')
-sns.set_style("darkgrid")
+# Default: do NOT set dark style globally - let functions handle it based on darkstyle parameter
 
 # Import custom modules
 from LIF_objects.LIFNeuronWithReversal import LIFNeuronWithReversal
 from LIF_objects.CircularNeuronalNetwork import CircularNeuronalNetwork
 from LIF_utils.simulation_utils import run_unified_simulation, check_criticality_during_run
-from LIF_utils.activity_vis_utils import visualize_activity_grid, plot_network_activity_with_stimuli, plot_psth_and_raster
+from LIF_utils.activity_vis_utils import (visualize_activity_grid, plot_network_activity_with_stimuli,
+                                          plot_psth_and_raster, plot_ei_psth_and_raster,
+                                          plot_oscillation_frequency_analysis)
 from LIF_utils.network_vis_utils import plot_network_connections_sparse, visualize_distance_weights
 from LIF_utils.neuron_vis_utils import plot_reversal_effects
 from LIF_utils.criticality_analysis_utils import plot_enhanced_criticality_analysis,analyze_criticality_comprehensively
 from LIF_utils.correlation_length_utils import visualize_spatial_correlations
+
+
+def save_experiment_config(network, experiment_params, save_path="experiment_config.json"):
+    """
+    Save a comprehensive configuration file detailing all network and neuron parameters.
+
+    Parameters:
+    -----------
+    network : CircularNeuronalNetwork
+        The network object containing all configuration
+    experiment_params : dict
+        Dictionary of experiment-level parameters passed to run_improved_experiment
+    save_path : str
+        Path to save the config file
+    """
+    # Get a sample neuron to extract class defaults
+    sample_excitatory = None
+    sample_inhibitory = None
+    for neuron in network.neurons:
+        if neuron.is_inhibitory and sample_inhibitory is None:
+            sample_inhibitory = neuron
+        elif not neuron.is_inhibitory and sample_excitatory is None:
+            sample_excitatory = neuron
+        if sample_excitatory and sample_inhibitory:
+            break
+
+    # Build neuron parameters from sample neurons
+    neuron_params = {
+        "excitatory_neuron": {
+            "v_rest": sample_excitatory.v_rest,
+            "v_threshold": sample_excitatory.v_threshold,
+            "v_reset": sample_excitatory.v_reset,
+            "tau_m": sample_excitatory.tau_m,
+            "tau_ref": sample_excitatory.tau_ref,
+            "tau_e": sample_excitatory.tau_e,
+            "tau_i": sample_excitatory.tau_i,
+            "e_reversal": sample_excitatory.e_reversal,
+            "i_reversal": sample_excitatory.i_reversal,
+            "k_reversal": sample_excitatory.k_reversal,
+            "v_noise_amp": sample_excitatory.v_noise_amp,
+            "i_noise_amp": sample_excitatory.i_noise_amp,
+            "adaptation_increment": sample_excitatory.adaptation_increment,
+            "tau_adaptation": sample_excitatory.tau_adaptation,
+            "is_inhibitory": False
+        } if sample_excitatory else None,
+        "inhibitory_neuron": {
+            "v_rest": sample_inhibitory.v_rest,
+            "v_threshold": sample_inhibitory.v_threshold,
+            "v_reset": sample_inhibitory.v_reset,
+            "tau_m": sample_inhibitory.tau_m,
+            "tau_ref": sample_inhibitory.tau_ref,
+            "tau_e": sample_inhibitory.tau_e,
+            "tau_i": sample_inhibitory.tau_i,
+            "e_reversal": sample_inhibitory.e_reversal,
+            "i_reversal": sample_inhibitory.i_reversal,
+            "k_reversal": sample_inhibitory.k_reversal,
+            "v_noise_amp": sample_inhibitory.v_noise_amp,
+            "i_noise_amp": sample_inhibitory.i_noise_amp,
+            "adaptation_increment": sample_inhibitory.adaptation_increment,
+            "tau_adaptation": sample_inhibitory.tau_adaptation,
+            "is_inhibitory": True
+        } if sample_inhibitory else None
+    }
+
+    # Build network parameters
+    network_params = {
+        "n_neurons": network.n_neurons,
+        "weight_scale": network.weight_scale,
+        "distance_lambda": network.distance_lambda,
+        "side_length": network.side_length,
+        "v_noise_amp": network.v_noise_amp,
+        "i_noise_amp": network.i_noise_amp,
+        "e_reversal": network.e_reversal,
+        "i_reversal": network.i_reversal,
+        "attempted_connections": network.attempted_connections,
+        "nonzero_connections": network.nonzero_connections,
+        "connection_density": network.nonzero_connections / (network.n_neurons * (network.n_neurons - 1))
+    }
+
+    # Count neuron types
+    n_excitatory = sum(1 for n in network.neurons if not n.is_inhibitory)
+    n_inhibitory = sum(1 for n in network.neurons if n.is_inhibitory)
+
+    # Build complete config
+    config = {
+        "metadata": {
+            "timestamp": datetime.now().isoformat(),
+            "description": "Circular network experiment configuration"
+        },
+        "experiment_parameters": experiment_params,
+        "network_parameters": network_params,
+        "neuron_parameters": neuron_params,
+        "network_composition": {
+            "total_neurons": network.n_neurons,
+            "excitatory_neurons": n_excitatory,
+            "inhibitory_neurons": n_inhibitory,
+            "inhibitory_fraction_actual": n_inhibitory / network.n_neurons
+        }
+    }
+
+    # Save to file
+    with open(save_path, 'w') as f:
+        json.dump(config, f, indent=2)
+
+    print(f"\nExperiment configuration saved to: {save_path}")
+    return config
 
 
 def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
@@ -29,10 +136,16 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
                             stochastic_stim=True, layout='circle', no_stimulation=False,
                             enable_noise=True, v_noise_amp=0.3, i_noise_amp=0.05,
                             e_reversal=0.0, i_reversal=-80.0, random_seed=42, distance_lambda=0.1, animate=False,
-                            std_enabled=False, U=0.3, tau_d=400.0):
+                            darkstyle=False,
+                            # Stimulation mode parameters (only active when stochastic_stim=False and no_stimulation=False)
+                            current_injection_stimulation=True,  # Sustained current for N timesteps
+                            current_injection_duration=1,        # How many timesteps current is applied
+                            poisson_process_stimulation=False,   # Probabilistic stim (only if current_injection=False)
+                            poisson_process_probability=0.1,     # Per-timestep probability of firing during window
+                            poisson_process_duration=1):         # Window length in timesteps
     """
     Run experiment with the improved neuron model that includes reversal potentials.
-    
+
     Parameters:
     -----------
     n_neurons : int
@@ -73,12 +186,21 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
             Distance decay constant for synaptic weights (higher values mean faster decay)
     animate : bool
             If True, generate an animation of the neural activity grid
-    std_enabled : bool
-        Enable Short-Term Synaptic Depression (default: False)
-    U : float
-        Utilization factor for STD (fraction of resources released per spike)
-    tau_d : float
-        Recovery time constant for STD in ms
+    darkstyle : bool
+        If True, use dark background style. If False, use white background (default: True)
+    current_injection_stimulation : bool
+        Sustained current mode: apply current for N consecutive timesteps.
+        Only used when stochastic_stim=False and no_stimulation=False.
+    current_injection_duration : int
+        Number of timesteps current is applied per stim_interval trigger
+    poisson_process_stimulation : bool
+        Probabilistic mode: each timestep has probability P of triggering stim.
+        Only used when current_injection=False, stochastic_stim=False, no_stimulation=False.
+    poisson_process_probability : float
+        Per-timestep probability (0-1) of stimulation during the window.
+        When triggered, applies stim_interval_strength current.
+    poisson_process_duration : int
+        Window length (timesteps) for Poisson process per stim_interval trigger
     """
     print("Creating neural network with reversal potentials and biologically plausible parameters...")
     
@@ -103,11 +225,40 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
         i_noise_amp=actual_i_noise,
         e_reversal=e_reversal,       # Excitatory reversal potential
         i_reversal=i_reversal,       # Inhibitory reversal potential
-        distance_lambda=distance_lambda,
-        std_enabled=std_enabled,     # Short-Term Depression
-        U=U,                         # STD utilization factor
-        tau_d=tau_d                  # STD recovery time constant
+        distance_lambda=distance_lambda
     )
+
+    # Save experiment configuration
+    experiment_params = {
+        "n_neurons": n_neurons,
+        "connection_p": connection_p,
+        "weight_scale": weight_scale,
+        "duration": duration,
+        "dt": dt,
+        "stim_interval": stim_interval,
+        "stim_interval_strength": stim_interval_strength,
+        "stim_fraction": stim_fraction,
+        "transmission_delay": transmission_delay,
+        "inhibitory_fraction": inhibitory_fraction,
+        "stochastic_stim": stochastic_stim,
+        "layout": layout,
+        "no_stimulation": no_stimulation,
+        "enable_noise": enable_noise,
+        "v_noise_amp": v_noise_amp,
+        "i_noise_amp": i_noise_amp,
+        "e_reversal": e_reversal,
+        "i_reversal": i_reversal,
+        "random_seed": random_seed,
+        "distance_lambda": distance_lambda,
+        "animate": animate,
+        "darkstyle": darkstyle,
+        "current_injection_stimulation": current_injection_stimulation,
+        "current_injection_duration": current_injection_duration,
+        "poisson_process_stimulation": poisson_process_stimulation,
+        "poisson_process_probability": poisson_process_probability,
+        "poisson_process_duration": poisson_process_duration
+    }
+    save_experiment_config(network, experiment_params, save_path="experiment_config.json")
 
     # Choose a neuron to visualize
     neuron_to_highlight = 42  # This can be any valid neuron index
@@ -117,7 +268,8 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
     network_fig, scatter_fig = visualize_distance_weights(
         network=network,
         neuron_idx=neuron_to_highlight,
-        save_path="distance_weights_neuron42.png"
+        save_path="distance_weights_neuron42.png",
+        darkstyle=darkstyle
 )
 
 
@@ -147,6 +299,13 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
     # FIRST RUN: Exploratory run with minimal tracking to identify neurons of interest
     print("\n=== FIRST RUN: Exploratory simulation to identify neurons of interest ===")
 
+    # Print stimulation mode info
+    if not no_stimulation:
+        if current_injection_stimulation:
+            print(f"Stimulation mode: Current Injection (duration={current_injection_duration} timesteps)")
+        elif poisson_process_stimulation:
+            print(f"Stimulation mode: Poisson Process (probability={poisson_process_probability}, duration={poisson_process_duration} timesteps)")
+
     # Run first simulation without tracking specific neurons
     activity_record, _, stimulation_record = run_unified_simulation(
         network,
@@ -158,7 +317,12 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
         stim_neuron=None,
         track_neurons=None,  # Don't track any specific neurons in first run
         stochastic_stim=stochastic_stim,
-        no_stimulation=no_stimulation
+        no_stimulation=no_stimulation,
+        current_injection_stimulation=current_injection_stimulation,
+        current_injection_duration=current_injection_duration,
+        poisson_process_stimulation=poisson_process_stimulation,
+        poisson_process_probability=poisson_process_probability,
+        poisson_process_duration=poisson_process_duration
     )
     
     # Analyze avalanches from the first run
@@ -255,16 +419,21 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
     # Run the simulation again with the same random seed, but track specific neurons
     # This will produce the same stimulation pattern as the first run
     activity_record, neuron_data, stimulation_record = run_unified_simulation(
-        network, 
-        duration=duration, 
-        dt=dt, 
+        network,
+        duration=duration,
+        dt=dt,
         stim_interval=stim_interval,
         stim_interval_strength=stim_interval_strength,
         stim_fraction=stim_fraction,
         stim_neuron=None,
         track_neurons=track_neurons,  # Now track our selected neurons
         stochastic_stim=stochastic_stim,
-        no_stimulation=no_stimulation
+        no_stimulation=no_stimulation,
+        current_injection_stimulation=current_injection_stimulation,
+        current_injection_duration=current_injection_duration,
+        poisson_process_stimulation=poisson_process_stimulation,
+        poisson_process_probability=poisson_process_probability,
+        poisson_process_duration=poisson_process_duration
     )
     
     # Restore the original avalanche data from the first run
@@ -277,22 +446,24 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
         # Create grid visualization animation with stimulation tracking
         print("\nGenerating visualizations...")
         visualize_activity_grid(
-            network, 
-            activity_record, 
+            network,
+            activity_record,
             stim_times=stim_times,
             stim_neurons=all_stimulated_neurons,
-            dt=dt, 
+            dt=dt,
             save_path="neural_activity_grid.gif",
-            max_frames=duration*10  # Keep animation size manageable
+            max_frames=duration*10,  # Keep animation size manageable
+            darkstyle=darkstyle
         )
     
     # Plot network activity timeline
     plot_network_activity_with_stimuli(
-        network, 
+        network,
         activity_record,
-        stim_times, 
-        dt=dt, 
-        save_path="network_activity_timeline.png"
+        stim_times,
+        dt=dt,
+        save_path="network_activity_timeline.png",
+        darkstyle=darkstyle
     )
     
     # Plot neuron traces
@@ -308,9 +479,10 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
                 stimulated_neurons[0],
                 stim_times,
                 dt=dt,
-                save_path="reversal_effects_stimulated.png"
+                save_path="reversal_effects_stimulated.png",
+                darkstyle=darkstyle
             )
-        
+
         # Create the special reversal potential visualization for the first connected neuron
         if connected_neurons:
             plot_reversal_effects(
@@ -319,7 +491,8 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
                 connected_neurons[0],
                 stim_times,
                 dt=dt,
-                save_path="reversal_effects_connected.png"
+                save_path="reversal_effects_connected.png",
+                darkstyle=darkstyle
             )
     else:
         missing = [n for n in stimulated_neurons + connected_neurons if n not in neuron_data]
@@ -327,7 +500,7 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
     
     # Replace the original avalanche statistics visualization with the new one
     print("\nGenerating enhanced avalanche criticality visualizations...")
-    criticality_results = plot_enhanced_criticality_analysis(network, save_path_prefix="avalanche")
+    criticality_results = plot_enhanced_criticality_analysis(network, save_path_prefix="avalanche", darkstyle=darkstyle)
     
     # Access the visualization results
     if criticality_results["success"]:
@@ -346,15 +519,16 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
     
     # Plot detailed network connectivity with highlighted neurons but only a fraction of edges
     plot_network_connections_sparse(
-        network, 
-        stimulated_neurons, 
-        connected_neurons, 
+        network,
+        stimulated_neurons,
+        connected_neurons,
         edge_percent=.5,  # Show only 5% of edges to reduce clutter
-        save_path="network_connections_sparse.png"
+        save_path="network_connections_sparse.png",
+        darkstyle=darkstyle
     )
 
 
-     # Generate PSTH and raster plot
+    # Generate PSTH and raster plot
     print("\nGenerating PSTH and raster plot...")
     plot_psth_and_raster(
         activity_record,
@@ -363,19 +537,49 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
         dt=dt,
         neuron_subset=None,  # Use all neurons
         figsize=(14, 10),
-        save_path="psth_raster_plot.png"
+        save_path="psth_raster_plot.png",
+        darkstyle=darkstyle
     )
-    
 
-   # Add spatial correlation visualization
+    # Generate E/I separated PSTH and raster plot
+    print("\nGenerating excitatory/inhibitory PSTH and raster plot...")
+    plot_ei_psth_and_raster(
+        network=network,
+        activity_record=activity_record,
+        bin_size=20,  # 20 timesteps per bin = 2ms at dt=0.1
+        dt=dt,
+        figsize=(14, 12),
+        save_path="ei_psth_raster_plot.png",
+        darkstyle=darkstyle
+    )
+
+    # Generate oscillation frequency analysis
+    print("\nGenerating oscillation frequency analysis...")
+    freq_fig, freq_info = plot_oscillation_frequency_analysis(
+        activity_record=activity_record,
+        dt=dt,
+        figsize=(14, 10),
+        save_path="oscillation_frequency_analysis.png",
+        darkstyle=darkstyle
+    )
+    print(f"Peak frequency: {freq_info['peak_frequency_hz']:.1f} Hz")
+    print(f"Dominant band: {freq_info['dominant_band']}")
+    print(f"Gamma oscillations: {'YES' if freq_info['is_gamma'] else 'NO'}")
+
+    # Add spatial correlation visualization
     print("\nGenerating spatial correlation visualization...")
+    # Use small time bins (2-5ms) to capture fast synchrony during avalanches
+    # This matches the timescale of synaptic transmission delays
+    # More bins = better temporal resolution but noisier correlations
+    correlation_time_bin = 3.0  # 3ms bins - good balance for avalanche dynamics
     spatial_correlation_results = visualize_spatial_correlations(
         network=network,
         activity_record=activity_record,
-        time_bin_ms=60,  # Larger time bins to capture correlations better
+        time_bin_ms=correlation_time_bin,
         dt=dt,
-        distance_bins=10,  # Fewer bins for more robust statistics
-        save_prefix="spatial_correlation_map.png"
+        distance_bins=15,  # More distance bins for finer spatial resolution
+        save_prefix="spatial_correlation_map.png",
+        darkstyle=darkstyle
     )
 
     if spatial_correlation_results["success"]:
@@ -393,59 +597,69 @@ def run_improved_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
 
 
 # Function to run experiment with biologically plausible parameters optimized for criticality
-def run_biologically_plausible_simulation(random_seed=42, std_enabled=False):
+def run_biologically_plausible_simulation(random_seed=42, darkstyle=False):
     """
     Run a simulation with biologically plausible parameters optimized for
     observing neuronal avalanches, using the enhanced neuron model with reversal potentials.
 
-    Based on parameters that give the best criticality score in previous grid search.
+    Stimulation Modes:
+    ------------------
+    - current_injection_stimulation=True: At each stim_interval, selected neurons
+      receive sustained current for current_injection_duration timesteps.
+
+    - poisson_process_stimulation=True (requires current_injection=False): At each
+      stim_interval, a window opens where each selected neuron has poisson_process_probability
+      probability of receiving stimulation per timestep, for poisson_process_duration timesteps.
 
     Parameters:
     -----------
     random_seed : int
         Random seed for reproducibility
-    std_enabled : bool
-        Enable Short-Term Synaptic Depression (default: False)
+    darkstyle : bool
+        If True, use dark background style. If False, use white background
     """
 
     return run_improved_experiment(
         # Network parameters
-        n_neurons=3000,             # Local cortical circuit size
+        n_neurons=6000,             # Local cortical circuit size
         connection_p=0.3,            # 5% connectivity in local cortical circuits
-        weight_scale=0.1,            # Further reduced weight scale to prevent super-critical activity
-        inhibitory_fraction=.3,      # 20% inhibitory neurons is biologically realistic
+        weight_scale=0.2,            # Further reduced weight scale to prevent super-critical activity
+        inhibitory_fraction=.24,      # 20% inhibitory neurons is biologically realistic
         transmission_delay=1,        # Local connections: 0.5-2 ms delay
         distance_lambda=.1,          # higher is faster decay, check visualization
-        
+
         # Simulation parameters
-        duration=3000,                 # 600 ms to observe many avalanches
+        duration=70,                 # 600 ms to observe many avalanches
         dt=0.1,                       # 0.1 ms for precise spike timing
-        
+
         # Stimulation parameters
-        stim_interval=50,            # 300ms stimulation interval
+        stim_interval=25,            # 300ms stimulation interval
         stim_interval_strength=50,   # Reduced stimulation strength
         stim_fraction=.01,           # Regular stimulation for this experiment
-        no_stimulation = True,
-        stochastic_stim = False,      # No external stimulation to observe intrinsic dynamics
-        
+        no_stimulation=True,
+        stochastic_stim=False,      # No external stimulation to observe intrinsic dynamics
+
+        # Stimulation mode parameters
+        current_injection_stimulation=True,
+        current_injection_duration=1,
+        poisson_process_stimulation=False,
+        poisson_process_probability=0.1,
+        poisson_process_duration=1,
+
         # Noise parameters
         enable_noise=True,            # Biological neurons have intrinsic noise
-        v_noise_amp=.08 ,              # Reduced membrane potential noise
+        v_noise_amp=.08,              # Reduced membrane potential noise
         i_noise_amp=0.003,            # Reduced synaptic noise
-        
+
         # Reversal potential parameters (biophysically realistic values)
         e_reversal=0.0,               # AMPA/NMDA reversal potential
         i_reversal=-80.0,             # GABA-A reversal potential
 
-        # STD parameters
-        std_enabled = False,           # Short-Term Depression toggle
-        U=0.3,                        # 30% release probability
-        tau_d=150,                    # 150ms recovery time constant
-
         # Other parameters
         layout='circle',              # Layout for visualization
         random_seed=random_seed,
-        animate=False       # Random seed for reproducibility
+        animate=True,                 # Generate animation
+        darkstyle=darkstyle           # Pass through darkstyle parameter
     )
 
 

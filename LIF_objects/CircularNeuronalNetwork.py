@@ -19,11 +19,10 @@ class CircularNeuronalNetwork:
             weight_min=0.0, spatial=True, transmission_delay=1.0,
             inhibitory_fraction=0.2, layout='grid',
             v_noise_amp=0.3, i_noise_amp=0.05,
-            e_reversal=0.0, i_reversal=-80.0, distance_lambda=1,
-            std_enabled=False, U=0.3, tau_d=400.0):
+            e_reversal=0.0, i_reversal=-80.0, distance_lambda=1):
         """
         Initialize the network with the given parameters.
-        
+
         Parameters:
         -----------
         n_neurons : int
@@ -52,23 +51,12 @@ class CircularNeuronalNetwork:
             Inhibitory reversal potential (mV)
         distance_lambda : float
             Distance decay constant for synaptic weights (higher values mean faster decay)
-        std_enabled : bool
-            Enable Short-Term Synaptic Depression (Tsodyks-Markram model)
-        U : float
-            Utilization factor for STD (fraction of resources released per spike)
-        tau_d : float
-            Recovery time constant for STD in ms
         """
         # Store distance decay parameter
         self.distance_lambda = distance_lambda
         self.n_neurons = n_neurons
         self.weight_scale = weight_scale
 
-        # STD state variables
-        self.std_enabled = std_enabled
-        self.U = U  # Utilization factor
-        self.tau_d = tau_d  # Recovery time constant (ms)
-        
         # Calculate grid dimensions (approximate square)
         self.side_length = int(np.ceil(np.sqrt(n_neurons)))
         
@@ -87,44 +75,19 @@ class CircularNeuronalNetwork:
         for i in range(n_neurons):
             # Determine if inhibitory based on fraction
             is_inhibitory = np.random.rand() < inhibitory_fraction
-            
-            # Create neuron with appropriate parameters
-            if is_inhibitory:
-                # Inhibitory neurons - stronger adaptation to prevent sustained firing
-                neuron = LIFNeuronWithReversal(
-                    v_rest=-65.0, 
-                    v_threshold=-55.0, 
-                    v_reset=-75.0,
-                    tau_m=10.0, 
-                    tau_ref=np.random.uniform(1, 1.5), 
-                    tau_e=3.0,             # Faster excitatory time constant
-                    tau_i=7.0,             # Shorter inhibitory time constant
-                    is_inhibitory=True,
-                    e_reversal=e_reversal,     # Excitatory reversal potential
-                    i_reversal=i_reversal,     # Inhibitory reversal potential
-                    v_noise_amp=v_noise_amp,   # Membrane potential noise
-                    i_noise_amp=i_noise_amp,   # Synaptic input noise
-                    adaptation_increment=0.1,  # Stronger adaptation for inhibitory neurons was .8
-                    tau_adaptation=40.0       # Adaptation time constant was 100
-                )
-            else:
-                # Excitatory neurons - moderate adaptation
-                neuron = LIFNeuronWithReversal(
-                    v_rest=-65.0, 
-                    v_threshold=-55.0, 
-                    v_reset=-75.0,
-                    tau_m=10.0, 
-                    tau_ref=np.random.uniform(2, 2.5), 
-                    tau_e=3.0,              # Faster excitatory time constant 
-                    tau_i=7.0,              # Shorter inhibitory time constant
-                    is_inhibitory=False,
-                    e_reversal=e_reversal,      # Excitatory reversal potential
-                    i_reversal=i_reversal,      # Inhibitory reversal potential  
-                    v_noise_amp=v_noise_amp,    # Membrane potential noise
-                    i_noise_amp=i_noise_amp,    # Synaptic input noise
-                    adaptation_increment=0.05,   # Standard adaptation for excitatory neurons was .5
-                    tau_adaptation=40.0        # Adaptation time constant was 100
-                )
+
+            # Create neuron using class defaults for biologically plausible parameters
+            # tau_ref: None -> 2.5ms (inhib) / 4.0ms (excit)
+            # adaptation_increment: 0.2 (tuned for ~2:1 ratio with tau_ref defaults)
+            # tau_adaptation: 100.0ms
+            neuron = LIFNeuronWithReversal(
+                is_inhibitory=is_inhibitory,
+                e_reversal=e_reversal,
+                i_reversal=i_reversal,
+                v_noise_amp=v_noise_amp,
+                i_noise_amp=i_noise_amp,
+                # All other params use class defaults
+            )
             
             self.neurons.append(neuron)
             
@@ -139,13 +102,6 @@ class CircularNeuronalNetwork:
         # Initialize connection matrices - these will only store non-zero weights
         self.weights = np.zeros((n_neurons, n_neurons))
         self.delays = np.zeros((n_neurons, n_neurons))
-
-        # Initialize STD synaptic resources if enabled
-        if std_enabled:
-            # All synapses start with full resources (x = 1.0)
-            self.x_resources = np.ones((n_neurons, n_neurons))
-        else:
-            self.x_resources = None
 
         # Variables for tracking activity
         self.network_activity = []
@@ -332,10 +288,6 @@ class CircularNeuronalNetwork:
         # Clear the spike queue
         self.spike_queue = deque()
 
-        # Reset STD resources
-        if self.std_enabled:
-            self.x_resources = np.ones((self.n_neurons, self.n_neurons))
-
     def stimulate_neuron(self, idx, current):
         """Stimulate a specific neuron with given current."""
         if 0 <= idx < self.n_neurons:
@@ -416,12 +368,6 @@ class CircularNeuronalNetwork:
             self.current_avalanche_start = None
             self.current_avalanche_size = 0
 
-        # STD: Recover synaptic resources every timestep
-        if self.std_enabled:
-            # Exponential recovery: x(t+dt) = x(t) + (1 - x(t)) * (1 - exp(-dt/tau_d))
-            recovery_factor = 1.0 - np.exp(-dt / self.tau_d)
-            self.x_resources += (1.0 - self.x_resources) * recovery_factor
-
         # Process pending spikes that have reached their target time
         current_time = len(self.network_activity) * dt
         delivered_spikes = 0
@@ -440,29 +386,14 @@ class CircularNeuronalNetwork:
             # Use graph edges for propagation instead of iterating through all neurons
             # This efficiently skips zero-weight connections
             for j in self.graph.successors(i):
-                weight_base = self.weights[i, j]
+                weight = self.weights[i, j]
                 delay = self.delays[i, j]
-
-                # Apply STD if enabled
-                if self.std_enabled:
-                    x = self.x_resources[i, j]  # Current available resources
-                    u = self.U  # Utilization (release probability)
-
-                    # Compute effective weight with depression
-                    weight_effective = weight_base * u * x
-
-                    # Deplete resources: x ← x(1 - u)
-                    self.x_resources[i, j] = x * (1.0 - u)
-
-                    weight_to_deliver = weight_effective
-                else:
-                    weight_to_deliver = weight_base
 
                 # Calculate delivery time
                 delivery_time = current_time + delay
 
                 # Add to queue (delivery_time, source, target, weight)
-                self.spike_queue.append((delivery_time, i, j, weight_to_deliver))
+                self.spike_queue.append((delivery_time, i, j, weight))
         
         # Sort the queue by delivery time to ensure proper order
         if active_indices:

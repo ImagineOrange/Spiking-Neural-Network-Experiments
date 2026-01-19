@@ -13,9 +13,9 @@ class Layered_LIFNeuronWithReversal:
     - External stimulation via conductance change (external_stim_g).
     """
     def __init__(self, v_rest=-65.0, v_threshold=-55.0, v_reset=-75.0,
-                 tau_m=10.0, tau_ref=2.0, tau_e=3.0, tau_i=7.0, is_inhibitory=False,
+                 tau_m=10.0, tau_ref=None, tau_e=3.0, tau_i=7.0, is_inhibitory=False,
                  e_reversal=0.0, i_reversal=-70.0, v_noise_amp=0.5, i_noise_amp=0.05,
-                 adaptation_increment=0.3, tau_adaptation=100.0, e_k_reversal=-90.0):
+                 adaptation_increment=0.2, tau_adaptation=100.0, e_k_reversal=-90.0):
         """
         Initializes the LIF neuron with specified parameters.
 
@@ -24,7 +24,9 @@ class Layered_LIFNeuronWithReversal:
             v_threshold (float): Spike threshold potential (mV).
             v_reset (float): Reset potential after a spike (mV).
             tau_m (float): Membrane time constant (ms).
-            tau_ref (float): Absolute refractory period (ms).
+            tau_ref (float): Absolute refractory period (ms). If None, defaults to biologically
+                            plausible values based on neuron type: 4.0ms for excitatory (regular-spiking),
+                            2.5ms for inhibitory (fast-spiking).
             tau_e (float): Excitatory synapse time constant (ms).
             tau_i (float): Inhibitory synapse time constant (ms).
             is_inhibitory (bool): True if the neuron is inhibitory, False otherwise.
@@ -41,7 +43,14 @@ class Layered_LIFNeuronWithReversal:
         self.v_threshold = v_threshold
         self.v_reset = v_reset
         self.tau_m = tau_m
-        self.tau_ref = tau_ref
+
+        # Set biologically plausible refractory period based on neuron type if not specified
+        # Excitatory (regular-spiking pyramidal): ~4ms, max ~250 Hz
+        # Inhibitory (fast-spiking interneuron): ~2.5ms, max ~400 Hz
+        if tau_ref is None:
+            self.tau_ref = 2.5 if is_inhibitory else 4.0
+        else:
+            self.tau_ref = tau_ref
 
         # Synaptic properties
         self.tau_e = tau_e
@@ -102,12 +111,6 @@ class Layered_LIFNeuronWithReversal:
         Returns:
             bool: True if the neuron spiked during this time step, False otherwise.
         """
-        # Record current state before update
-        self.v_history.append(self.v)
-        self.g_e_history.append(self.g_e)
-        self.g_i_history.append(self.g_i)
-        self.adaptation_history.append(self.adaptation)
-
         # Calculate synaptic currents based on conductances and driving forces (V_reversal - V_membrane)
         i_syn_internal = self.g_e * (self.e_reversal - self.v) + self.g_i * (self.i_reversal - self.v)
         # Add current from direct external stimulation conductance
@@ -121,6 +124,11 @@ class Layered_LIFNeuronWithReversal:
         # --- Refractory Period ---
         if self.t_since_spike < self.tau_ref:
             self.v = self.v_reset # Clamp voltage at reset potential
+            # Record state during refractory period
+            self.v_history.append(self.v)
+            self.g_e_history.append(self.g_e)
+            self.g_i_history.append(self.g_i)
+            self.adaptation_history.append(self.adaptation)
             # Conductances and adaptation still decay during refractory period
             self.g_e *= np.exp(-dt / self.tau_e)
             self.g_i *= np.exp(-dt / self.tau_i)
@@ -173,11 +181,23 @@ class Layered_LIFNeuronWithReversal:
 
         # --- Spike Detection ---
         if self.v >= self.v_threshold:
+            # Record threshold value (not overshot value) - LIF spikes instantaneously at threshold
+            self.v_history.append(self.v_threshold)
+            self.g_e_history.append(self.g_e)
+            self.g_i_history.append(self.g_i)
+            self.adaptation_history.append(self.adaptation)
+
             self.v = self.v_reset # Reset potential
             self.t_since_spike = 0.0 # Reset time since spike (enter refractory period)
             self.adaptation += self.adaptation_increment # Increase adaptation conductance (g_adapt)
             self.spike_times.append(len(self.v_history) * dt) # Record spike time
             return True # Neuron spiked
+
+        # Record state (no spike)
+        self.v_history.append(self.v)
+        self.g_e_history.append(self.g_e)
+        self.g_i_history.append(self.g_i)
+        self.adaptation_history.append(self.adaptation)
 
         return False # Neuron did not spike
 

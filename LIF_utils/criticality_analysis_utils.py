@@ -3,224 +3,60 @@ import matplotlib.pyplot as plt
 from scipy import stats
 import seaborn as sns
 
-# Set dark style for plots
-plt.style.use('dark_background')
-sns.set_style("darkgrid")
-# Disable gridlines globally
-plt.rc('grid', alpha=0)  # Makes grids fully transparent
-# Alternative approach to completely disable them:
-plt.rc('axes', grid=False)
+# Default: do NOT set dark style globally - let functions handle it based on darkstyle parameter
 
-
-
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy import stats
-import seaborn as sns
-
-# Set dark style for plots
-plt.style.use('dark_background')
-sns.set_style("darkgrid")
-
-def plot_individual_avalanche_statistics(network, save_path_prefix="avalanche", figsize=(10, 8)):
+def plot_individual_avalanche_statistics(network, save_path_prefix="avalanche", figsize=(10, 8), darkstyle=True):
     """
-    Create plots showing individual avalanche data points for size and duration distributions
-    on log-log scale, along with the branching ratio visualization.
-    
+    Create plots showing avalanche size vs duration scaling and branching ratio visualization.
+
+    Note: Individual size and duration distribution plots have been removed because they are
+    intrinsically bounded by network size and simulation length, making power-law fits unreliable.
+    The size-duration scaling relationship (σ exponent) is more robust as it measures the
+    relationship between size and duration rather than fitting truncated distributions.
+
     Parameters:
     -----------
     network : ExtendedNeuronalNetworkWithReversal
         The neural network object containing avalanche data
     save_path_prefix : str
-        Prefix for saving the output files (will append _size.png, _duration.png, etc.)
+        Prefix for saving the output files (will append _size_vs_duration.png, _branching.png)
     figsize : tuple
         Figure size (width, height) in inches
-        
+    darkstyle : bool
+        If True, use dark background style. If False, use white background (default: True)
+
     Returns:
     --------
     tuple
-        (size_fig, duration_fig, branching_fig) - The three figure objects
+        (scatter_fig, branching_fig) - The figure objects
     """
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        text_color = 'white'
+        box_color = '#222222'
+        fit_line_color = 'white'
+        default_info_text_color = 'white'
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        box_color = '#eeeeee'
+        fit_line_color = 'black'
+        default_info_text_color = 'black'
+
     if not network.avalanche_sizes:
         print("No avalanches recorded.")
-        return None, None, None
-    
-    # ===== 1. AVALANCHE SIZE DISTRIBUTION WITH INDIVIDUAL POINTS =====
-    size_fig = plt.figure(figsize=figsize, facecolor='#1a1a1a')
-    ax_size = size_fig.add_subplot(111)
-    
-    # Get unique sizes and count occurrences
-    unique_sizes, size_counts = np.unique(network.avalanche_sizes, return_counts=True)
-    
-    # Normalize counts to get probability
-    total_avalanches = len(network.avalanche_sizes)
-    size_probabilities = size_counts / total_avalanches
-    
-    # Plot individual avalanche size data points
-    ax_size.loglog(unique_sizes, size_probabilities, 'o', color='#ff7f0e', 
-                  markersize=6, alpha=0.7, label="Individual Avalanches")
-    # Force background color again after loglog (which sometimes resets it)
-    ax_size.set_facecolor('#1a1a1a')
-    
-    # Fit power law using linear regression in log-log space
-    if len(network.avalanche_sizes) > 10:
-        try:
-            # Convert to log scale for linear regression
-            log_sizes = np.log10(unique_sizes)
-            log_probs = np.log10(size_probabilities)
-            
-            # Perform linear regression
-            slope, intercept, r_value, p_value, std_err = stats.linregress(log_sizes, log_probs)
-            alpha_size = -slope  # Negative slope is the power law exponent
-            
-            # Generate points for the fitted line
-            x_fit = np.logspace(np.log10(min(unique_sizes)), np.log10(max(unique_sizes)), 100)
-            log_y_fit = intercept + slope * np.log10(x_fit)
-            y_fit = 10**log_y_fit
-            
-            # Plot the fitted power law
-            ax_size.loglog(x_fit, y_fit, '--', color='white', alpha=0.7, linewidth=2.5,
-                         label=f"Power Law Fit: α = {alpha_size:.2f}, R² = {r_value**2:.2f}")
-            
-            # Force background color again after loglog (which sometimes resets it)
-            ax_size.set_facecolor('#1a1a1a')
-            # Add reference line with ideal slope
-            ideal_alpha = 1.5
-            # Keep same intercept as our fitted line
-            ideal_log_y = intercept - ideal_alpha * np.log10(x_fit)
-            ideal_y = 10**ideal_log_y
-            
-            ax_size.loglog(x_fit, ideal_y, '-.', color='#1dd1a1', alpha=0.7, linewidth=2,
-                         label=f"Ideal Power Law: α = {ideal_alpha}")
-            # Force background color again after loglog (which sometimes resets it)
-            ax_size.set_facecolor('#1a1a1a')    
-            
-        except Exception as e:
-            print(f"Power law fitting error for sizes: {e}")
-    
-    # Style and label the plot
-    ax_size.set_xlabel("Avalanche Size", color='white', fontsize=14)
-    ax_size.set_ylabel("Probability", color='white', fontsize=14)
-    ax_size.set_title("Avalanche Size Distribution (Individual Data Points)", color='white', fontsize=16)
-    ax_size.legend(loc='best', framealpha=0.7, fontsize=12)
-    
-    # Add grid and improve appearance
-    ax_size.grid(True, which="both", ls="-", alpha=0.2)
-    ax_size.tick_params(colors='white', labelsize=12)
-    for spine in ax_size.spines.values():
-        spine.set_color('white')
-    
-    # Add information text about criticality
-    if len(network.avalanche_sizes) > 10:
-        text = f"Critical systems show power law exponent α ≈ 1.5\n"
-        text += f"Current exponent: α = {alpha_size:.2f} (R² = {r_value**2:.2f})\n"
-        text += f"Number of avalanches: {len(network.avalanche_sizes)}"
-        
-        # Color-code based on how close to ideal exponent
-        text_color = '#1dd1a1' if 1.3 <= alpha_size <= 1.7 else 'white'
-        ax_size.text(0.03, 0.03, text, transform=ax_size.transAxes, fontsize=11,
-                    verticalalignment='bottom', horizontalalignment='left',
-                    color=text_color, bbox=dict(facecolor='#222222', alpha=0.7, boxstyle='round'))
-    
-    plt.tight_layout()
-    if save_path_prefix:
-        size_path = f"{save_path_prefix}_size_individual.png"
-        size_fig.savefig(size_path, dpi=300, bbox_inches='tight', facecolor='#1a1a1a')
-        print(f"Saved individual avalanche size plot to {size_path}")
-    
-    # ===== 2. AVALANCHE DURATION DISTRIBUTION WITH INDIVIDUAL POINTS =====
-    dur_fig = plt.figure(figsize=figsize, facecolor='#1a1a1a')
-    ax_dur = dur_fig.add_subplot(111)
-    
-    # Get unique durations and count occurrences
-    unique_durations, dur_counts = np.unique(network.avalanche_durations, return_counts=True)
-    
-    # Normalize counts to get probability
-    dur_probabilities = dur_counts / total_avalanches
-    
-    # Plot individual avalanche duration data points
-    ax_dur.loglog(unique_durations, dur_probabilities, 'o', color='#1f77b4',
-                markersize=6, alpha=0.7, label="Individual Avalanches")
-    # Force background color again after loglog (which sometimes resets it)
-    ax_dur.set_facecolor('#1a1a1a')
-    
-    # Fit power law using linear regression in log-log space
-    if len(network.avalanche_durations) > 10:
-        try:
-            # Convert to log scale for linear regression
-            log_durations = np.log10(unique_durations)
-            log_probs = np.log10(dur_probabilities)
-            
-            # Perform linear regression
-            slope, intercept, r_value, p_value, std_err = stats.linregress(log_durations, log_probs)
-            alpha_dur = -slope  # Negative slope is the power law exponent
-            
-            # Generate points for the fitted line
-            x_fit = np.logspace(np.log10(min(unique_durations)), np.log10(max(unique_durations)), 100)
-            log_y_fit = intercept + slope * np.log10(x_fit)
-            y_fit = 10**log_y_fit
-            
-            # Plot the fitted power law
-            ax_dur.loglog(x_fit, y_fit, '--', color='white', alpha=0.7, linewidth=2.5,
-                        label=f"Power Law Fit: α = {alpha_dur:.2f}, R² = {r_value**2:.2f}")
-            # Force background color again after loglog (which sometimes resets it)
-            ax_dur.set_facecolor('#1a1a1a')
+        return None, None
 
-            # Add reference line with ideal slope
-            ideal_alpha = 2.0
-            # Keep same intercept as our fitted line
-            ideal_log_y = intercept - ideal_alpha * np.log10(x_fit)
-            ideal_y = 10**ideal_log_y
-
-            ax_dur.loglog(x_fit, ideal_y, '-.', color='#1dd1a1', alpha=0.7, linewidth=2,
-                        label=f"Ideal Power Law: α = {ideal_alpha}")
-            # Force background color again after loglog (which sometimes resets it)
-            ax_dur.set_facecolor('#1a1a1a')
-            
-        except Exception as e:
-            print(f"Power law fitting error for durations: {e}")
-    
-    # Style and label the plot
-    ax_dur.set_xlabel("Avalanche Duration (ms)", color='white', fontsize=14)
-    ax_dur.set_ylabel("Probability", color='white', fontsize=14)
-    ax_dur.set_title("Avalanche Duration Distribution (Individual Data Points)", color='white', fontsize=16)
-    ax_dur.legend(loc='best', framealpha=0.7, fontsize=12)
-    
-    # Add grid and improve appearance
-    ax_dur.grid(True, which="both", ls="-", alpha=0.2)
-    ax_dur.tick_params(colors='white', labelsize=12)
-    for spine in ax_dur.spines.values():
-        spine.set_color('white')
-    
-    
-    
-    # Add information text about criticality
-    if len(network.avalanche_durations) > 10:
-        text = f"Critical systems show power law exponent α ≈ 2.0\n"
-        text += f"Current exponent: α = {alpha_dur:.2f} (R² = {r_value**2:.2f})\n"
-        text += f"Number of avalanches: {len(network.avalanche_durations)}"
-        
-        # Color-code based on how close to ideal exponent
-        text_color = '#1dd1a1' if 1.8 <= alpha_dur <= 2.2 else 'white'
-        ax_dur.text(0.03, 0.03, text, transform=ax_dur.transAxes, fontsize=11,
-                   verticalalignment='bottom', horizontalalignment='left',
-                   color=text_color, bbox=dict(facecolor='#222222', alpha=0.7, boxstyle='round'))
-    
-    plt.tight_layout()
-    if save_path_prefix:
-        dur_path = f"{save_path_prefix}_duration_individual.png"
-        dur_fig.savefig(dur_path, dpi=300, bbox_inches='tight', facecolor='#1a1a1a')
-        print(f"Saved individual avalanche duration plot to {dur_path}")
-    
-    # ===== 3. SCATTER PLOT OF SIZE VS DURATION =====
-    scatter_fig = plt.figure(figsize=figsize, facecolor='#1a1a1a')
+    # ===== 1. SCATTER PLOT OF SIZE VS DURATION =====
+    scatter_fig = plt.figure(figsize=figsize, facecolor=bg_color)
     ax_scatter = scatter_fig.add_subplot(111)
     
     # Plot scatter of size vs duration
     ax_scatter.loglog(network.avalanche_durations, network.avalanche_sizes, 'o',
                      color='#9b59b6', alpha=0.6, markersize=6, label="Individual Avalanches")
     # Force background color again after loglog (which sometimes resets it)
-    ax_scatter.set_facecolor('#1a1a1a')
+    ax_scatter.set_facecolor(bg_color)
     
     # Try to fit a power law relationship
     if len(network.avalanche_sizes) > 10:
@@ -238,33 +74,33 @@ def plot_individual_avalanche_statistics(network, save_path_prefix="avalanche", 
             y_fit = 10**(intercept) * (x_fit ** slope)
             
             # Plot the fitted relationship
-            ax_scatter.loglog(x_fit, y_fit, '--', color='white', alpha=0.7, linewidth=2.5,
+            ax_scatter.loglog(x_fit, y_fit, '--', color=fit_line_color, alpha=0.7, linewidth=2.5,
                            label=f"Fit: Size ~ Duration^{slope:.2f}, R²={r_value**2:.2f}")
 
             # Force background color again after loglog (which sometimes resets it)
-            ax_scatter.set_facecolor('#1a1a1a')
+            ax_scatter.set_facecolor(bg_color)
 
             # Mark the critical theoretical relationship (slope = 1.5)
             critical_y = 10**(intercept) * (x_fit ** 1.5)
             ax_scatter.loglog(x_fit, critical_y, '-.', color='#1dd1a1', alpha=0.7, linewidth=2,
                            label=f"Critical Theory: Size ~ Duration^1.5")
             # Force background color again after loglog (which sometimes resets it)
-            ax_scatter.set_facecolor('#1a1a1a')        
+            ax_scatter.set_facecolor(bg_color)        
 
         except Exception as e:
             print(f"Regression error for size vs duration: {e}")
     
     # Style and label the plot
-    ax_scatter.set_xlabel("Avalanche Duration (ms)", color='white', fontsize=14)
-    ax_scatter.set_ylabel("Avalanche Size", color='white', fontsize=14)
-    ax_scatter.set_title("Avalanche Size vs Duration", color='white', fontsize=16)
+    ax_scatter.set_xlabel("Avalanche Duration (ms)", color=text_color, fontsize=14)
+    ax_scatter.set_ylabel("Avalanche Size", color=text_color, fontsize=14)
+    ax_scatter.set_title("Avalanche Size vs Duration", color=text_color, fontsize=16)
     ax_scatter.legend(loc='best', framealpha=0.7, fontsize=12)
     
     # Add grid and improve appearance
     ax_scatter.grid(True, which="both", ls="-", alpha=0.2)
-    ax_scatter.tick_params(colors='white', labelsize=12)
+    ax_scatter.tick_params(colors=text_color, labelsize=12)
     for spine in ax_scatter.spines.values():
-        spine.set_color('white')
+        spine.set_color(text_color)
     
     # Add information text about criticality
     if len(network.avalanche_sizes) > 10:
@@ -273,19 +109,19 @@ def plot_individual_avalanche_statistics(network, save_path_prefix="avalanche", 
         text += f"Correlation: R²={r_value**2:.2f}"
         
         # Color-code based on how close to ideal exponent
-        text_color = '#1dd1a1' if 1.3 <= slope <= 1.7 else 'white'
+        info_text_color = '#1dd1a1' if 1.3 <= slope <= 1.7 else default_info_text_color
         ax_scatter.text(0.03, 0.03, text, transform=ax_scatter.transAxes, fontsize=11,
                       verticalalignment='bottom', horizontalalignment='left',
-                      color=text_color, bbox=dict(facecolor='#222222', alpha=0.7, boxstyle='round'))
+                      color=info_text_color, bbox=dict(facecolor=box_color, alpha=0.7, boxstyle='round'))
     
     plt.tight_layout()
     if save_path_prefix:
         scatter_path = f"{save_path_prefix}_size_vs_duration.png"
-        scatter_fig.savefig(scatter_path, dpi=300, bbox_inches='tight', facecolor='#1a1a1a')
+        scatter_fig.savefig(scatter_path, dpi=300, bbox_inches='tight', facecolor=bg_color)
         print(f"Saved size vs duration scatter plot to {scatter_path}")
     
     # ===== 4. BRANCHING PARAMETER VISUALIZATION (KEEPING THE ORIGINAL) =====
-    branching_fig = plt.figure(figsize=figsize, facecolor='#1a1a1a')
+    branching_fig = plt.figure(figsize=figsize, facecolor=bg_color)
     ax_branch = branching_fig.add_subplot(111)
     
     # Calculate branching ratio (number of descendants per ancestor)
@@ -326,9 +162,9 @@ def plot_individual_avalanche_statistics(network, save_path_prefix="avalanche", 
                             label='Critical: 1.0')
             
             # Style plot
-            ax_branch.set_xlabel('Branching Ratio (Descendants/Ancestors)', color='white', fontsize=14)
-            ax_branch.set_ylabel('Probability Density', color='white', fontsize=14)
-            ax_branch.set_title('Branching Parameter Distribution', color='white', fontsize=16)
+            ax_branch.set_xlabel('Branching Ratio (Descendants/Ancestors)', color=text_color, fontsize=14)
+            ax_branch.set_ylabel('Probability Density', color=text_color, fontsize=14)
+            ax_branch.set_title('Branching Parameter Distribution', color=text_color, fontsize=16)
             
             # Add info text about criticality
             text = f"Critical branching occurs at exactly 1.0\n"
@@ -349,14 +185,14 @@ def plot_individual_avalanche_statistics(network, save_path_prefix="avalanche", 
             
             ax_branch.text(0.03, 0.97, text, transform=ax_branch.transAxes, fontsize=11,
                          verticalalignment='top', horizontalalignment='left',
-                         color=text_color, bbox=dict(facecolor='#222222', alpha=0.7, boxstyle='round'))
+                         color=text_color, bbox=dict(facecolor=box_color, alpha=0.7, boxstyle='round'))
         else:
-            ax_branch.text(0.5, 0.5, "Insufficient data for branching analysis", 
-                         transform=ax_branch.transAxes, fontsize=14, color='white',
+            ax_branch.text(0.5, 0.5, "Insufficient data for branching analysis",
+                         transform=ax_branch.transAxes, fontsize=14, color=text_color,
                          ha='center', va='center')
     else:
         ax_branch.text(0.5, 0.5, "Insufficient activity data for branching analysis",
-                     transform=ax_branch.transAxes, fontsize=14, color='white',
+                     transform=ax_branch.transAxes, fontsize=14, color=text_color,
                      ha='center', va='center')
 
     # Add legend only if we have artists with labels
@@ -365,36 +201,39 @@ def plot_individual_avalanche_statistics(network, save_path_prefix="avalanche", 
         ax_branch.legend(loc='upper right', framealpha=0.7, fontsize=12)
     
     # Style improvements
-    ax_branch.set_facecolor('#1a1a1a')
-    ax_branch.tick_params(colors='white', labelsize=12)
+    ax_branch.set_facecolor(bg_color)
+    ax_branch.tick_params(colors=text_color, labelsize=12)
     for spine in ax_branch.spines.values():
-        spine.set_color('white')
+        spine.set_color(text_color)
     ax_branch.grid(True, which='both', linestyle='--', alpha=0.3)
     
     plt.tight_layout()
     if save_path_prefix:
         branch_path = f"{save_path_prefix}_branching.png"
-        branching_fig.savefig(branch_path, dpi=300, bbox_inches='tight', facecolor='#1a1a1a')
+        branching_fig.savefig(branch_path, dpi=300, bbox_inches='tight', facecolor=bg_color)
         print(f"Saved branching parameter plot to {branch_path}")
     
-    return size_fig, dur_fig, scatter_fig, branching_fig
+    return scatter_fig, branching_fig
 
 
 # Function to use in the main code to replace the original visualization
-def plot_enhanced_criticality_analysis(network, save_path_prefix="avalanche"):
+def plot_enhanced_criticality_analysis(network, save_path_prefix="avalanche", darkstyle=True):
     """
-    Enhanced version of criticality analysis that shows individual data points
-    and additional visualizations.
-    
-    This function can be used as a replacement for plot_simplified_avalanche_statistics.
-    
+    Enhanced version of criticality analysis focusing on robust metrics.
+
+    This function creates visualizations for size-duration scaling and branching ratio.
+    Individual size and duration distributions are not plotted because they are
+    intrinsically bounded by network size and simulation length.
+
     Parameters:
     -----------
     network : ExtendedNeuronalNetworkWithReversal
         The neural network object containing avalanche data
     save_path_prefix : str
         Prefix for saving the output files
-        
+    darkstyle : bool
+        If True, use dark background style. If False, use white background (default: True)
+
     Returns:
     --------
     dict
@@ -404,115 +243,75 @@ def plot_enhanced_criticality_analysis(network, save_path_prefix="avalanche"):
     if not network.avalanche_sizes or len(network.avalanche_sizes) < 5:
         print("Insufficient avalanche data for analysis.")
         return {"success": False, "message": "Insufficient avalanche data"}
-    
-    # Create all the visualizations
-    size_fig, dur_fig, scatter_fig, branching_fig = plot_individual_avalanche_statistics(
-        network, save_path_prefix=save_path_prefix
+
+    # Create visualizations (size vs duration scatter and branching ratio)
+    scatter_fig, branching_fig = plot_individual_avalanche_statistics(
+        network, save_path_prefix=save_path_prefix, darkstyle=darkstyle
     )
-    
+
     # Run basic analysis to return metrics
     try:
-        # Get unique sizes and their probabilities
-        unique_sizes, size_counts = np.unique(network.avalanche_sizes, return_counts=True)
-        size_probabilities = size_counts / len(network.avalanche_sizes)
-        
-        # Get unique durations and their probabilities
-        unique_durations, dur_counts = np.unique(network.avalanche_durations, return_counts=True)
-        dur_probabilities = dur_counts / len(network.avalanche_durations)
-        
-        # Fit power law using linear regression in log-log space for sizes
-        log_sizes = np.log10(unique_sizes)
-        log_size_probs = np.log10(size_probabilities)
-        size_slope, size_intercept, size_r_value, _, _ = stats.linregress(log_sizes, log_size_probs)
-        alpha_size = -size_slope  # Negative slope is the power law exponent
-        
-        # Fit power law using linear regression in log-log space for durations
-        log_durations = np.log10(unique_durations)
-        log_dur_probs = np.log10(dur_probabilities)
-        dur_slope, dur_intercept, dur_r_value, _, _ = stats.linregress(log_durations, log_dur_probs)
-        alpha_duration = -dur_slope  # Negative slope is the power law exponent
-        
-        # Calculate correlation between log size and log duration for individual avalanches
+        # Calculate scaling exponent (size vs duration) - this is the σ exponent
         log_avalanche_sizes = np.log10(network.avalanche_sizes)
         log_avalanche_durations = np.log10(network.avalanche_durations)
-        r_value = np.corrcoef(log_avalanche_sizes, log_avalanche_durations)[0, 1]
-        
-        # Calculate scaling exponent (size vs duration)
         slope, intercept, scaling_r_value, _, _ = stats.linregress(log_avalanche_durations, log_avalanche_sizes)
-        
+
         # Calculate branching parameter
         activity = np.array(network.network_activity)
         non_zero_idx = np.where(activity > 0)[0]
         branching_ratio = None
-        
+
         if len(non_zero_idx) > 1:
             next_idx = non_zero_idx + 1
             valid_idx = next_idx[next_idx < len(activity)]
             prev_idx = valid_idx - 1
             valid_mask = activity[prev_idx] > 0
-            
+
             if np.sum(valid_mask) > 0:
                 branching_ratios = activity[valid_idx[valid_mask]] / activity[prev_idx[valid_mask]]
                 branching_ratio = float(np.mean(branching_ratios))
-        
-        # Compile analysis results
+
+        # Compile analysis results (only robust metrics)
         analysis = {
             "avalanche_count": len(network.avalanche_sizes),
-            "size_exponent": float(alpha_size),
-            "size_r_squared": float(size_r_value**2),
-            "duration_exponent": float(alpha_duration),
-            "duration_r_squared": float(dur_r_value**2),
-            "size_duration_correlation": float(r_value),
             "size_duration_scaling": float(slope),
             "size_duration_r_squared": float(scaling_r_value**2),
             "branching_ratio": branching_ratio
         }
-        
-        # Determine criticality based on standard criteria
-        is_critical_size = 1.3 <= alpha_size <= 1.7
-        is_critical_duration = 1.8 <= alpha_duration <= 2.2
+
+        # Determine criticality based on robust criteria only
         is_critical_branching = branching_ratio is not None and 0.95 <= branching_ratio <= 1.05
         is_critical_scaling = 1.3 <= slope <= 1.7
-        
-        # Overall assessment
-        critical_count = sum([is_critical_size, is_critical_duration, 
-                             is_critical_branching, is_critical_scaling])
-        
-        if critical_count >= 3:
+
+        # Overall assessment based on two robust metrics
+        if is_critical_branching and is_critical_scaling:
             assessment = "Strongly critical"
             is_critical = True
-        elif critical_count >= 2:
+        elif is_critical_branching or is_critical_scaling:
             assessment = "Moderately critical"
             is_critical = True
-        elif critical_count >= 1:
-            assessment = "Weakly critical / near-critical"
-            is_critical = False
         else:
             assessment = "Not critical"
             is_critical = False
-            
+
         analysis["assessment"] = assessment
         analysis["is_critical"] = is_critical
-        
+
         print(f"\n===== Enhanced Criticality Analysis =====")
         print(f"Analyzed {analysis['avalanche_count']} avalanches")
-        print(f"Size exponent: α = {analysis['size_exponent']:.3f} (R² = {analysis['size_r_squared']:.3f}, ideal: ~1.5)")
-        print(f"Duration exponent: α = {analysis['duration_exponent']:.3f} (R² = {analysis['duration_r_squared']:.3f}, ideal: ~2.0)")
-        print(f"Size-duration scaling: {analysis['size_duration_scaling']:.3f} (R² = {analysis['size_duration_r_squared']:.3f}, ideal: ~1.5)")
+        print(f"Size-duration scaling (σ): {analysis['size_duration_scaling']:.3f} (R² = {analysis['size_duration_r_squared']:.3f}, ideal: ~1.5)")
         if branching_ratio is not None:
             print(f"Branching ratio: {analysis['branching_ratio']:.3f} (ideal: ~1.0)")
         print(f"Assessment: {analysis['assessment']}")
-        
+
     except Exception as e:
         print(f"Error during analysis: {e}")
         analysis = {"error": str(e)}
-    
+
     # Return all figures and analysis in a dictionary
     return {
         "success": True,
         "figures": {
-            "size": size_fig,
-            "duration": dur_fig,
             "scatter": scatter_fig,
             "branching": branching_fig
         },
@@ -676,56 +475,34 @@ def analyze_criticality_comprehensively(network, save_plots=True, min_avalanches
         print(f"Error calculating scaling relation: {e}")
     
     # ===== Calculate Overall Criticality Score =====
-    
-    # Define ideal values and weights
+    # Note: Only using branching ratio and size-duration scaling (σ exponent)
+    # Individual size/duration exponents are excluded because they are intrinsically
+    # bounded by network size and simulation length, making power-law fits unreliable.
+
+    # Define ideal values and weights (only robust metrics)
     ideal_values = {
-        "size_exponent": 1.5,       # Ideal: ~1.5
-        "duration_exponent": 2.0,    # Ideal: ~2.0
         "branching_ratio": 1.0,      # Ideal: ~1.0
         "scaling_relation": 1.5      # Ideal: ~1.5
     }
-    
+
+    # Equal weights for the two robust metrics
     weights = {
-        "size_exponent": 0.3,        # 30% of score
-        "duration_exponent": 0.3,     # 30% of score
-        "branching_ratio": 0.2,       # 20% of score
-        "scaling_relation": 0.2       # 20% of score
+        "branching_ratio": 0.5,       # 50% of score
+        "scaling_relation": 0.5       # 50% of score
     }
-    
+
     score = 0.0
     weight_sum = 0.0
-    
-    # Prioritize binning method but use powerlaw fit if binning not available
-    method_to_use = "binning" if results["methods"].get("binning") else "powerlaw"
-    
-    if results["methods"].get(method_to_use):
-        # Size exponent score
-        if "size_exponent" in results["methods"][method_to_use]:
-            size_exponent = results["methods"][method_to_use]["size_exponent"]
-            # Score decreases with distance from ideal, using inverse exponential
-            size_score = np.exp(-2.0 * abs(size_exponent - ideal_values["size_exponent"]))
-            score += weights["size_exponent"] * size_score
-            weight_sum += weights["size_exponent"]
-            
-            results["size_exponent_used"] = size_exponent
-        
-        # Duration exponent score
-        if "duration_exponent" in results["methods"][method_to_use]:
-            dur_exponent = results["methods"][method_to_use]["duration_exponent"]
-            dur_score = np.exp(-2.0 * abs(dur_exponent - ideal_values["duration_exponent"]))
-            score += weights["duration_exponent"] * dur_score
-            weight_sum += weights["duration_exponent"]
-            
-            results["duration_exponent_used"] = dur_exponent
-    
+
     # Branching ratio score
     if results["branching_ratio"] is not None:
         branching_ratio = results["branching_ratio"]
         # Score based on how close branching ratio is to 1.0
-        br_score = 1.0 - min(1.0, abs(branching_ratio - ideal_values["branching_ratio"]))
+        # Use exponential decay for consistency with scaling score
+        br_score = np.exp(-2.0 * abs(branching_ratio - ideal_values["branching_ratio"]))
         score += weights["branching_ratio"] * br_score
         weight_sum += weights["branching_ratio"]
-    
+
     # Scaling relation score
     if results["scaling_relation"] is not None:
         scaling_relation = results["scaling_relation"]
@@ -733,20 +510,20 @@ def analyze_criticality_comprehensively(network, save_plots=True, min_avalanches
         scaling_score = np.exp(-2.0 * abs(scaling_relation - ideal_values["scaling_relation"]))
         score += weights["scaling_relation"] * scaling_score
         weight_sum += weights["scaling_relation"]
-    
+
     # Normalize by the sum of weights for metrics that were actually calculated
     if weight_sum > 0:
         score /= weight_sum
-    
+
     # Bonus for having many avalanches (more statistical confidence)
     avalanche_count_bonus = min(0.15, results["avalanche_count"] / 1000)
     score = score * (1.0 + avalanche_count_bonus)
-    
+
     # Cap at 1.0
     score = min(1.0, score)
-    
+
     results["critical_score"] = float(score)
-    
+
     # Determine if the system is critical
     # More nuanced assessment than a simple binary
     if score >= 0.85:
@@ -761,47 +538,39 @@ def analyze_criticality_comprehensively(network, save_plots=True, min_avalanches
     else:
         results["critical"] = False
         results["assessment"] = "Not critical"
-    
+
     # Print summary
     print("\n===== Comprehensive Criticality Analysis =====")
     print(f"Analyzed {results['avalanche_count']} avalanches")
     print(f"Critical Score: {results['critical_score']:.4f} - {results['assessment']}")
-    
-    if method_to_use == "binning":
-        method_name = "log-binning + regression"
-    else:
-        method_name = "direct powerlaw fit"
-        
-    print(f"\nExponents (using {method_name}):")
-    if "size_exponent_used" in results:
-        print(f"  Size exponent: α = {results['size_exponent_used']:.3f} (ideal: ~1.5)")
-    if "duration_exponent_used" in results:
-        print(f"  Duration exponent: α = {results['duration_exponent_used']:.3f} (ideal: ~2.0)")
-    
+
+    print(f"\nRobust metrics used for scoring:")
     if results["branching_ratio"] is not None:
-        print(f"Branching ratio: {results['branching_ratio']:.3f} (ideal: ~1.0)")
-    
+        print(f"  Branching ratio: {results['branching_ratio']:.3f} (ideal: ~1.0)")
+
     if results["scaling_relation"] is not None:
-        print(f"Size-duration scaling: {results['scaling_relation']:.3f} (ideal: ~1.5)")
-    
+        print(f"  Size-duration scaling (σ): {results['scaling_relation']:.3f} (ideal: ~1.5)")
+
     # Print warnings for reliability
     if results["avalanche_count"] < 100:
         print("\nWarning: Low avalanche count may reduce statistical reliability")
         if results["avalanche_count"] < 50:
             results["reliable"] = False
-    
+
     # Create visualization plots if requested
     if save_plots:
         plot_enhanced_criticality_analysis(network, save_path_prefix="avalanche")
-    
+
     return results
 
 
 # Modified function to replace plot_avalanche_statistics for backward compatibility
 def plot_avalanche_statistics(network, save_path="avalanche_statistics.png", figsize=(12, 8)):
     """
-    Backward compatibility function that calls the simplified plot function.
+    Backward compatibility function that calls the enhanced plot function.
     """
-    print("Using simplified avalanche statistics visualization...")
-    size_fig, dur_fig, branching_fig = plot_enhanced_criticality_analysis(network, save_path_prefix="avalanche")
-    return size_fig  # Return the size figure for backward compatibility
+    print("Using enhanced avalanche statistics visualization...")
+    result = plot_enhanced_criticality_analysis(network, save_path_prefix="avalanche")
+    if result.get("success") and result.get("figures"):
+        return result["figures"].get("scatter")  # Return the scatter figure for backward compatibility
+    return None

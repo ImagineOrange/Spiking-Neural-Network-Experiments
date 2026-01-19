@@ -1,0 +1,35 @@
+============================================================
+EXPERIMENT 14: exp_014_xi5_ei12_ie45_w3.1
+============================================================
+Seed: 56 (base=42, exp_id=14)
+Parameters:
+  pConn_ei_input: 0.05
+  pConn_ei: 0.12
+  pConn_ie: 0.45
+  weight_ie: 3.15
+  n_e: 400
+  n_i: 100
+  n_input: 784
+  weight_ei: 10.4
+  pConn_ee_input: 1.0
+============================================================
+
+PHASE 1: TRAINING
+------------------------------------------------------------
+
+EXPERIMENT ERROR: [Errno 2] No such file or directory: '/Users/ethancrouse/Desktop/Spiking-Neural-Network-Experiments/phase_3_Learning_over_time/diehl_2015_research_additions/grid_search_20260114_022210/exp_014_xi5_ei12_ie45_w3.1/grid_search_20260114_022210/exp_014_xi5_ei12_ie45_w3.1/config.py'
+Traceback (most recent call last):
+  File "/Users/ethancrouse/Desktop/Spiking-Neural-Network-Experiments/phase_3_Learning_over_time/diehl_2015_research_additions/grid_search_ei.py", line 248, in run_experiment_isolated
+    ConfigClass = load_config_isolated(config_path)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ethancrouse/Desktop/Spiking-Neural-Network-Experiments/phase_3_Learning_over_time/diehl_2015_research_additions/grid_search_ei.py", line 143, in load_config_isolated
+    spec.loader.exec_module(config_module)
+  File "<frozen importlib._bootstrap_external>", line 991, in exec_module
+  File "<frozen importlib._bootstrap_external>", line 1128, in get_code
+  File "<frozen importlib._bootstrap_external>", line 1186, in get_data
+FileNotFoundError: [Errno 2] No such file or directory: '/Users/ethancrouse/Desktop/Spiking-Neural-Network-Experiments/phase_3_Learning_over_time/diehl_2015_research_additions/grid_search_20260114_022210/exp_014_xi5_ei12_ie45_w3.1/grid_search_20260114_022210/exp_014_xi5_ei12_ie45_w3.1/config.py'
+
+Experiment directory: grid_search_20260114_022210/exp_014_xi5_ei12_ie45_w3.1
+Working directory at error: /Users/ethancrouse/Desktop/Spiking-Neural-Network-Experiments/phase_3_Learning_over_time/diehl_2015_research_additions/grid_search_20260114_022210/exp_014_xi5_ei12_ie45_w3.1
+
+TRAINING FAILED - skipping test pass

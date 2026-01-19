@@ -3,7 +3,7 @@ import numpy as np
 class LIFNeuronWithReversal:
     """
     Enhanced Leaky Integrate-and-Fire neuron model with reversal potentials and spike-frequency adaptation.
-    
+
     This implementation includes:
     - Separate excitatory and inhibitory synaptic conductances
     - Reversal potentials for excitatory and inhibitory inputs
@@ -11,16 +11,23 @@ class LIFNeuronWithReversal:
     - Spike-frequency adaptation to prevent tonic firing
     """
     def __init__(self, v_rest=-65.0, v_threshold=-55.0, v_reset=-75.0,
-                 tau_m=10.0, tau_ref=2.0, tau_e=3.0, tau_i=7.0, is_inhibitory=False,
+                 tau_m=10.0, tau_ref=None, tau_e=3.0, tau_i=7.0, is_inhibitory=False,
                  e_reversal=0.0, i_reversal=-70.0, k_reversal=-90.0,
                  v_noise_amp=0.5, i_noise_amp=0.05,
-                 adaptation_increment=0.3, tau_adaptation=100.0):
+                 adaptation_increment=0.2, tau_adaptation=100.0):
         # Membrane parameters
         self.v_rest = v_rest          # Resting potential (mV)
         self.v_threshold = v_threshold  # Threshold potential (mV)
         self.v_reset = v_reset        # Reset potential after spike (mV)
         self.tau_m = tau_m            # Membrane time constant (ms)
-        self.tau_ref = tau_ref        # Refractory period (ms)
+
+        # Set biologically plausible refractory period based on neuron type if not specified
+        # Excitatory (regular-spiking pyramidal): ~4ms, max ~250 Hz
+        # Inhibitory (fast-spiking interneuron): ~2.5ms, max ~400 Hz
+        if tau_ref is None:
+            self.tau_ref = 2.5 if is_inhibitory else 4.0
+        else:
+            self.tau_ref = tau_ref
         
         # Synaptic time constants
         self.tau_e = tau_e            # Excitatory synaptic time constant (ms)
@@ -44,7 +51,7 @@ class LIFNeuronWithReversal:
         self.g_e = 0.0                # Excitatory conductance
         self.g_i = 0.0                # Inhibitory conductance
         self.adaptation = 0.0         # Adaptation current (initially zero)
-        self.t_since_spike = tau_ref  # Time since last spike (ms)
+        self.t_since_spike = self.tau_ref  # Time since last spike (ms)
         self.is_inhibitory = is_inhibitory
         
         # Recording variables

@@ -5,17 +5,33 @@ import random
 import matplotlib.animation as animation # Ensure animation is imported
 from tqdm import tqdm
 
-# Set dark style for plots
-plt.style.use('dark_background')
+# Default: do NOT set dark style globally - let functions handle it based on darkstyle parameter
 
-def plot_network_connections_sparse(network, stimulated_neurons=None, connected_neurons=None, 
-                             edge_percent=1, save_path="network_connections_sparse.png"):
+def plot_network_connections_sparse(network, stimulated_neurons=None, connected_neurons=None,
+                             edge_percent=1, save_path="network_connections_sparse.png", darkstyle=True):
     """
     Visualize the network connectivity with focus on the stimulated and connected neurons,
     showing only a specified percentage of edges to reduce visual clutter.
+
+    Parameters:
+    -----------
+    darkstyle : bool
+        If True, use dark background style. If False, use white background (default: True)
     """
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        text_color = 'white'
+        label_font_color = 'white'
+        legend_marker_edge = 'w'
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        label_font_color = 'black'
+        legend_marker_edge = 'k'
+
     # Create figure
-    fig, ax = plt.subplots(figsize=(12, 10), facecolor='#1a1a1a')
+    fig, ax = plt.subplots(figsize=(12, 10), facecolor=bg_color)
     
     # Get network graph from the network object
     G = network.graph
@@ -139,9 +155,9 @@ def plot_network_connections_sparse(network, stimulated_neurons=None, connected_
         labels[node] = f"C{node}"
     
     nx.draw_networkx_labels(
-        G, pos, 
+        G, pos,
         labels=labels,
-        font_color='white',
+        font_color=label_font_color,
         font_weight='bold',
         ax=ax
     )
@@ -149,24 +165,24 @@ def plot_network_connections_sparse(network, stimulated_neurons=None, connected_
     # Create a title with network information
     n_excitatory = sum(1 for n in G.nodes() if not G.nodes[n]['is_inhibitory'])
     n_inhibitory = network.n_neurons - n_excitatory
-    
+
     title = (f"Network Connectivity - {network.n_neurons} Neurons "
              f"({n_excitatory} Excitatory, {n_inhibitory} Inhibitory)\n"
              f"Showing {len(edges_to_draw)} of {total_edges} connections ({edge_percent}%)")
-    ax.set_title(title, color='white', fontsize=16)
+    ax.set_title(title, color=text_color, fontsize=16)
     
     # Add a legend
-    stimulated_patch = plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#1dd1a1',
+    stimulated_patch = plt.Line2D([0], [0], marker='o', color=legend_marker_edge, markerfacecolor='#1dd1a1',
                                  markersize=15, label='Stimulated (Exc)')
-    stimulated_inhib = plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='#1dd1a1',
+    stimulated_inhib = plt.Line2D([0], [0], marker='s', color=legend_marker_edge, markerfacecolor='#1dd1a1',
                                  markersize=15, label='Stimulated (Inhib)')
-    connected_patch = plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#ff6b6b',
+    connected_patch = plt.Line2D([0], [0], marker='o', color=legend_marker_edge, markerfacecolor='#ff6b6b',
                                markersize=15, label='Connected (Exc)')
-    connected_inhib = plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='#ff6b6b',
+    connected_inhib = plt.Line2D([0], [0], marker='s', color=legend_marker_edge, markerfacecolor='#ff6b6b',
                                markersize=15, label='Connected (Inhib)')
-    other_exc = plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#a5b1c2',
+    other_exc = plt.Line2D([0], [0], marker='o', color=legend_marker_edge, markerfacecolor='#a5b1c2',
                          markersize=15, label='Other (Exc)')
-    other_inhib = plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='#a5b1c2',
+    other_inhib = plt.Line2D([0], [0], marker='s', color=legend_marker_edge, markerfacecolor='#a5b1c2',
                            markersize=15, label='Other (Inhib)')
     exc_conn = plt.Line2D([0], [0], color='#1f77b4', lw=1.5, label='Excitatory Connection')
     inh_conn = plt.Line2D([0], [0], color='#d62728', lw=1.5, label='Inhibitory Connection')
@@ -176,9 +192,10 @@ def plot_network_connections_sparse(network, stimulated_neurons=None, connected_
                       exc_conn, inh_conn], 
              loc='upper right', framealpha=0.7)
     
-    # Turn off axis
+    # Turn off axis and set background
+    ax.set_facecolor(bg_color)
     ax.set_axis_off()
-    
+
     # Save the network connectivity visualization
     plt.tight_layout()
     if save_path:
@@ -187,13 +204,13 @@ def plot_network_connections_sparse(network, stimulated_neurons=None, connected_
     
     return fig
 
-def visualize_distance_weights(network, neuron_idx, network_figsize=(18, 18), 
-                               scatter_figsize=(10, 8), save_path=None):
+def visualize_distance_weights(network, neuron_idx, network_figsize=(18, 18),
+                               scatter_figsize=(10, 8), save_path=None, darkstyle=True):
     """
     Creates two separate figures showing how connection weights decay with distance:
     1. A network visualization showing outgoing connections from a specific neuron
     2. A weight vs. distance scatter plot showing the distance-weight relationship
-    
+
     Parameters:
     -----------
     network : ExtendedNeuronalNetworkWithReversal
@@ -207,12 +224,27 @@ def visualize_distance_weights(network, neuron_idx, network_figsize=(18, 18),
     save_path : str or None
         Base path to save the visualizations, if provided.
         Will append "_network" and "_scatter" to the base name.
-            
+    darkstyle : bool
+        If True, use dark background style. If False, use white background (default: True)
+
     Returns:
     --------
     tuple
         (network_fig, scatter_fig) - The two figure objects
     """
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        text_color = 'white'
+        zero_line_color = 'white'
+        outgoing_scatter_color = 'yellow'
+        incoming_scatter_color = 'cyan'
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        zero_line_color = 'black'
+        outgoing_scatter_color = '#cc8800'  # Darker yellow/gold for light bg
+        incoming_scatter_color = '#0088aa'  # Darker cyan for light bg
     import matplotlib.cm as cm
     import matplotlib.colors as mcolors
     
@@ -243,15 +275,15 @@ def visualize_distance_weights(network, neuron_idx, network_figsize=(18, 18),
     
     # ========== FIGURE 1: NETWORK VISUALIZATION ==========
     # Create figure with zero padding to maximize space utilization
-    network_fig = plt.figure(figsize=network_figsize, facecolor='#1a1a1a', constrained_layout=False)
-    
+    network_fig = plt.figure(figsize=network_figsize, facecolor=bg_color, constrained_layout=False)
+
     # Create subplot that exactly fills the figure - use the entire canvas area
-    ax1 = network_fig.add_axes([0, 0, 1, 0.95], aspect='equal', frameon=False)  
-    
+    ax1 = network_fig.add_axes([0, 0, 1, 0.95], aspect='equal', frameon=False)
+
     # Add title at the very top with minimal space consumption
     n_connections = len(outgoing_data)
     title_text = f"Neuron {neuron_idx} - {n_connections} Outgoing Connections"
-    network_fig.text(0.5, 0.98, title_text, color='white', fontsize=16, ha='center', va='top')
+    network_fig.text(0.5, 0.98, title_text, color=text_color, fontsize=16, ha='center', va='top')
     
     # Use network positions for circular layout
     pos = {i: (col, row) for i, (row, col) in network.neuron_grid_positions.items()}
@@ -361,17 +393,17 @@ def visualize_distance_weights(network, neuron_idx, network_figsize=(18, 18),
     ax1.set_xlim(center_x - max_dist, center_x + max_dist)
     ax1.set_ylim(center_y - max_dist, center_y + max_dist)
     
-    ax1.set_facecolor('#1a1a1a')
+    ax1.set_facecolor(bg_color)
     ax1.axis('off')
-    
+
     # Save network figure if path provided
     if save_path:
         network_save_path = save_path.replace('.png', '_network.png') if '.png' in save_path else f"{save_path}_network.png"
-        network_fig.savefig(network_save_path, dpi=300, facecolor='#1a1a1a', bbox_inches='tight', pad_inches=0)
+        network_fig.savefig(network_save_path, dpi=300, facecolor=bg_color, bbox_inches='tight', pad_inches=0)
         print(f"Saved network distance visualization to {network_save_path}")
     
     # ========== FIGURE 2: WEIGHT VS DISTANCE PLOT ==========
-    scatter_fig = plt.figure(figsize=scatter_figsize, facecolor='#1a1a1a')
+    scatter_fig = plt.figure(figsize=scatter_figsize, facecolor=bg_color)
     ax2 = scatter_fig.add_subplot(111)
     
     outgoing_dist = [d for _, d, _ in outgoing_data]
@@ -380,9 +412,9 @@ def visualize_distance_weights(network, neuron_idx, network_figsize=(18, 18),
     incoming_weights = [w for _, _, w in incoming_data]
     
     # Plot outgoing connections
-    ax2.scatter(outgoing_dist, outgoing_weights, color='yellow', alpha=0.7, label='Outgoing', s=50)
+    ax2.scatter(outgoing_dist, outgoing_weights, color=outgoing_scatter_color, alpha=0.7, label='Outgoing', s=50)
     # Plot incoming connections
-    ax2.scatter(incoming_dist, incoming_weights, color='cyan', alpha=0.7, label='Incoming', s=50)
+    ax2.scatter(incoming_dist, incoming_weights, color=incoming_scatter_color, alpha=0.7, label='Incoming', s=50)
     
     # Plot exponential decay reference line
     if outgoing_data or incoming_data:
@@ -421,35 +453,36 @@ def visualize_distance_weights(network, neuron_idx, network_figsize=(18, 18),
         ax2.set_ylim(y_min, y_max)
     
     # Add horizontal line at y=0
-    ax2.axhline(y=0, color='white', linestyle='-', linewidth=0.5, alpha=0.5)
+    ax2.axhline(y=0, color=zero_line_color, linestyle='-', linewidth=0.5, alpha=0.5)
     
     # Add grid
     ax2.grid(True, alpha=0.2)
     
     # Style the scatter plot - larger fonts for dedicated figure
-    ax2.set_xlabel('Distance (grid units)', color='white', fontsize=14)
-    ax2.set_ylabel('Synaptic Weight', color='white', fontsize=14)
-    scatter_fig.suptitle('Weight vs. Distance', color='white', fontsize=16)
-    
+    ax2.set_xlabel('Distance (grid units)', color=text_color, fontsize=14)
+    ax2.set_ylabel('Synaptic Weight', color=text_color, fontsize=14)
+    scatter_fig.suptitle('Weight vs. Distance', color=text_color, fontsize=16)
+
     # Add legend
     ax2.legend(loc='upper right', framealpha=0.7, fontsize=12)
-    
-    ax2.set_facecolor('#1a1a1a')
-    ax2.tick_params(colors='white', labelsize=12)
-    
+
+    ax2.set_facecolor(bg_color)
+    ax2.tick_params(colors=text_color, labelsize=12)
+
     # Style spines
-    ax2.spines['bottom'].set_color('white')
-    ax2.spines['left'].set_color('white')
-    ax2.spines['top'].set_color('white')
-    ax2.spines['right'].set_color('white')
-    
+    spine_color = text_color
+    ax2.spines['bottom'].set_color(spine_color)
+    ax2.spines['left'].set_color(spine_color)
+    ax2.spines['top'].set_color(spine_color)
+    ax2.spines['right'].set_color(spine_color)
+
     # Maximize the plot in the figure
     scatter_fig.tight_layout()
-    
+
     # Save scatter figure if path provided
     if save_path:
         scatter_save_path = save_path.replace('.png', '_scatter.png') if '.png' in save_path else f"{save_path}_scatter.png"
-        scatter_fig.savefig(scatter_save_path, dpi=300, bbox_inches='tight', facecolor='#1a1a1a')
+        scatter_fig.savefig(scatter_save_path, dpi=300, bbox_inches='tight', facecolor=bg_color)
         print(f"Saved weight-distance relationship plot to {scatter_save_path}")
     
     # Return both figures
@@ -460,7 +493,7 @@ def visualize_distance_weights(network, neuron_idx, network_figsize=(18, 18),
 
 # Function to plot the network structure sparsely
 def Layered_plot_network_connections_sparse(network, pos, stimulated_neurons=None, connected_neurons=None,
-                             edge_percent=10, save_path="formal_layered_network_sim.png"):
+                             edge_percent=10, save_path="formal_layered_network_sim.png", darkstyle=False):
     """
     Visualizes the network connectivity, highlighting specific neurons and showing only a
     percentage of edges to reduce clutter, colored by connection type (feedforward, feedback, recurrent).
@@ -472,11 +505,22 @@ def Layered_plot_network_connections_sparse(network, pos, stimulated_neurons=Non
         connected_neurons (list, optional): Indices of neurons to highlight as connected.
         edge_percent (float): Percentage of total connections to display.
         save_path (str, optional): File path to save the visualization.
+        darkstyle (bool): If True, use dark background style. If False, use white background (default: False)
     """
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        text_color = 'white'
+        spine_color = '#555555'
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        spine_color = '#aaaaaa'
+
     graph = network.graph; n_neurons = network.n_neurons
-    # Create figure and axes with dark background
-    fig, ax = plt.subplots(figsize=(16, 9), facecolor='#1a1a1a')
-    ax.set_facecolor('#1a1a1a') # Explicitly set axes background
+    # Create figure and axes
+    fig, ax = plt.subplots(figsize=(16, 9), facecolor=bg_color)
+    ax.set_facecolor(bg_color)
 
     # Initialize lists if not provided
     if stimulated_neurons is None: stimulated_neurons = []
@@ -597,7 +641,7 @@ def Layered_plot_network_connections_sparse(network, pos, stimulated_neurons=Non
     # Create plot title
     title = (f"Formal {network.graph.graph.get('num_layers', '?')}-Layer Network - {n_neurons} Neurons ({n_excitatory} Exc, {n_inhibitory} Inhib)\n"
              f"Showing {len(edges_to_draw_list)} ({edge_percent:.1f}%) of {len(all_edges)} connections (Post Pruning)")
-    ax.set_title(title, color='white', fontsize=14)
+    ax.set_title(title, color=text_color, fontsize=14)
 
     # Create legend elements manually for clarity
     legend_elements = [
@@ -638,7 +682,7 @@ from tqdm import tqdm
 # --- CORRECTED/DYNAMIC Function ---
 def Layered_visualize_activity_layout_grid(network, pos, activity_record, dt=0.1, stim_record=None,
                                    grid_resolution=(100, 150), save_path="3_layer_layout_grid_activity.gif",
-                                   max_frames=1000, fps=30):
+                                   max_frames=1000, fps=30, darkstyle=False):
     """
     Creates a GIF animation showing neural activity spreading across the network layout.
     Neurons are mapped to a sparse grid based on their positions.
@@ -656,7 +700,18 @@ def Layered_visualize_activity_layout_grid(network, pos, activity_record, dt=0.1
         save_path (str): Path to save the output GIF file.
         max_frames (int): Maximum number of frames to include in the GIF (downsamples if needed).
         fps (int): Frames per second for the output GIF.
+        darkstyle (bool): If True, use dark background style. If False, use white background (default: False)
     """
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        text_color = 'white'
+        stim_text_color = 'lime'
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        stim_text_color = 'green'
+
     print(f"Generating sparse grid activity animation (up to {max_frames} frames)...")
     # Safely get total neuron count
     n_neurons = getattr(network, 'n_neurons', 0)
@@ -771,13 +826,13 @@ def Layered_visualize_activity_layout_grid(network, pos, activity_record, dt=0.1
     # --- Animation Setup ---
     aspect_ratio = grid_cols / grid_rows if grid_rows > 0 else 1
     fig_height = 8; fig_width = fig_height * aspect_ratio
-    fig, ax = plt.subplots(figsize=(max(8, fig_width), fig_height), facecolor='#1a1a1a')
-    ax.set_facecolor('#1a1a1a'); ax.set_xticks([]); ax.set_yticks([])
+    fig, ax = plt.subplots(figsize=(max(8, fig_width), fig_height), facecolor=bg_color)
+    ax.set_facecolor(bg_color); ax.set_xticks([]); ax.set_yticks([])
 
     activity_colors = np.zeros((grid_rows, grid_cols, 3)) # RGB color array
     img = ax.imshow(activity_colors, interpolation='nearest', origin='upper', vmin=0, vmax=1, aspect='auto')
-    title = ax.set_title(f"Time: 0.0 ms", color='white', fontsize=14)
-    stim_text = ax.text(0.01, 0.98, "", transform=ax.transAxes, color='lime', fontsize=10, verticalalignment='top', fontweight='bold')
+    title = ax.set_title(f"Time: 0.0 ms", color=text_color, fontsize=14)
+    stim_text = ax.text(0.01, 0.98, "", transform=ax.transAxes, color=stim_text_color, fontsize=10, verticalalignment='top', fontweight='bold')
     prev_activity_grid = np.zeros((grid_rows, grid_cols)) # Visual intensity state
 
     # Progress bar
@@ -847,7 +902,7 @@ def Layered_visualize_activity_layout_grid(network, pos, activity_record, dt=0.1
 # --- END CORRECTED/DYNAMIC Function ---
 
 
-def visualize_rich_club_distribution(network, save_path="rich_club_analysis.png"):
+def visualize_rich_club_distribution(network, save_path="rich_club_analysis.png", darkstyle=False):
     """
     Visualize the rich club distribution and coefficient for a network.
 
@@ -863,12 +918,25 @@ def visualize_rich_club_distribution(network, save_path="rich_club_analysis.png"
         The network to analyze
     save_path : str
         Path to save the figure
+    darkstyle (bool): If True, use dark background style. If False, use white background (default: False)
 
     Returns:
     --------
     dict
         Dictionary containing analysis results and figure
     """
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        subplot_bg_color = '#0a0a0a'
+        text_color = 'white'
+        box_color = '#2a2a2a'
+    else:
+        bg_color = 'white'
+        subplot_bg_color = '#f5f5f5'
+        text_color = 'black'
+        box_color = '#e0e0e0'
+
     print("\n=== Generating Rich Club Distribution Visualization ===")
 
     # Check if this is a rich club network
@@ -901,12 +969,12 @@ def visualize_rich_club_distribution(network, save_path="rich_club_analysis.png"
     rc = network.rich_club_coefficients
 
     # Create figure with subplots
-    fig = plt.figure(figsize=(16, 12), facecolor='#1a1a1a')
+    fig = plt.figure(figsize=(16, 12), facecolor=bg_color)
     gs = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
 
     # --- SUBPLOT 1: Degree Distribution ---
     ax1 = fig.add_subplot(gs[0, 0])
-    ax1.set_facecolor('#0a0a0a')
+    ax1.set_facecolor(subplot_bg_color)
 
     degrees_list = list(degree_counts.keys())
     counts_list = list(degree_counts.values())
@@ -914,14 +982,14 @@ def visualize_rich_club_distribution(network, save_path="rich_club_analysis.png"
     colors = ['#ff6b6b' if target_min <= deg <= target_max else '#54a0ff'
               for deg in degrees_list]
 
-    ax1.bar(degrees_list, counts_list, color=colors, edgecolor='white', linewidth=0.5, alpha=0.8)
+    ax1.bar(degrees_list, counts_list, color=colors, edgecolor=text_color, linewidth=0.5, alpha=0.8)
     ax1.axvspan(target_min, target_max, alpha=0.2, color='yellow', label='Rich Club Range')
-    ax1.set_xlabel('Degree (k)', fontsize=12, color='white')
-    ax1.set_ylabel('Number of Nodes', fontsize=12, color='white')
-    ax1.set_title('Degree Distribution', fontsize=14, fontweight='bold', color='white')
+    ax1.set_xlabel('Degree (k)', fontsize=12, color=text_color)
+    ax1.set_ylabel('Number of Nodes', fontsize=12, color=text_color)
+    ax1.set_title('Degree Distribution', fontsize=14, fontweight='bold', color=text_color)
     ax1.legend(fontsize=10)
     ax1.grid(True, alpha=0.3)
-    ax1.tick_params(colors='white')
+    ax1.tick_params(colors=text_color)
 
     # Add statistics text
     stats_text = f"Total nodes: {network.n_neurons}\n"
@@ -929,12 +997,12 @@ def visualize_rich_club_distribution(network, save_path="rich_club_analysis.png"
     stats_text += f"Target range: k={target_min}-{target_max}"
     ax1.text(0.95, 0.95, stats_text, transform=ax1.transAxes,
              fontsize=10, verticalalignment='top', horizontalalignment='right',
-             bbox=dict(boxstyle='round', facecolor='#2a2a2a', alpha=0.8),
-             color='white')
+             bbox=dict(boxstyle='round', facecolor=box_color, alpha=0.8),
+             color=text_color)
 
     # --- SUBPLOT 2: Rich Club Coefficient ---
     ax2 = fig.add_subplot(gs[0, 1])
-    ax2.set_facecolor('#0a0a0a')
+    ax2.set_facecolor(subplot_bg_color)
 
     if rc:
         k_values = sorted(rc.keys())
@@ -959,12 +1027,12 @@ def visualize_rich_club_distribution(network, save_path="rich_club_analysis.png"
                    alpha=0.5, label='Φ(k) = 1')
         ax2.axvspan(target_min, target_max, alpha=0.2, color='yellow')
 
-        ax2.set_xlabel('Degree (k)', fontsize=12, color='white')
-        ax2.set_ylabel('Rich Club Coefficient Φ(k)', fontsize=12, color='white')
-        ax2.set_title('Rich Club Coefficient', fontsize=14, fontweight='bold', color='white')
+        ax2.set_xlabel('Degree (k)', fontsize=12, color=text_color)
+        ax2.set_ylabel('Rich Club Coefficient Φ(k)', fontsize=12, color=text_color)
+        ax2.set_title('Rich Club Coefficient', fontsize=14, fontweight='bold', color=text_color)
         ax2.legend(fontsize=9)
         ax2.grid(True, alpha=0.3)
-        ax2.tick_params(colors='white')
+        ax2.tick_params(colors=text_color)
 
         # Add rich club statistics
         if rc_k:
@@ -973,17 +1041,17 @@ def visualize_rich_club_distribution(network, save_path="rich_club_analysis.png"
             rc_stats += f"Φ_norm > 1: {'Yes' if mean_phi > 1 else 'No'}"
             ax2.text(0.05, 0.95, rc_stats, transform=ax2.transAxes,
                     fontsize=10, verticalalignment='top',
-                    bbox=dict(boxstyle='round', facecolor='#2a2a2a', alpha=0.8),
-                    color='white')
+                    bbox=dict(boxstyle='round', facecolor=box_color, alpha=0.8),
+                    color=text_color)
     else:
         ax2.text(0.5, 0.5, 'Rich club coefficient\nnot available',
                 transform=ax2.transAxes, ha='center', va='center',
-                fontsize=12, color='white')
-        ax2.set_title('Rich Club Coefficient (N/A)', fontsize=14, fontweight='bold', color='white')
+                fontsize=12, color=text_color)
+        ax2.set_title('Rich Club Coefficient (N/A)', fontsize=14, fontweight='bold', color=text_color)
 
     # --- SUBPLOT 3: Network Visualization ---
     ax3 = fig.add_subplot(gs[1, :])
-    ax3.set_facecolor('#0a0a0a')
+    ax3.set_facecolor(subplot_bg_color)
 
     # Get positions
     pos = nx.get_node_attributes(network.graph, 'pos')
@@ -1023,7 +1091,7 @@ def visualize_rich_club_distribution(network, save_path="rich_club_analysis.png"
                           edge_color='#ff6b6b', alpha=0.3, width=1.5, ax=ax3)
 
     ax3.set_title('Network Structure: Rich Club Nodes Highlighted',
-                 fontsize=14, fontweight='bold', color='white')
+                 fontsize=14, fontweight='bold', color=text_color)
     ax3.axis('off')
 
     # Add legend
@@ -1037,7 +1105,7 @@ def visualize_rich_club_distribution(network, save_path="rich_club_analysis.png"
 
     # --- SUBPLOT 4: Connection Matrix ---
     ax4 = fig.add_subplot(gs[2, 0])
-    ax4.set_facecolor('#0a0a0a')
+    ax4.set_facecolor(subplot_bg_color)
 
     # Create adjacency matrix for rich club nodes
     if len(rich_club_nodes) > 0 and len(rich_club_nodes) <= 100:
@@ -1051,33 +1119,33 @@ def visualize_rich_club_distribution(network, save_path="rich_club_analysis.png"
                     rc_adj[i, j] = 1
 
         im = ax4.imshow(rc_adj, cmap='hot', interpolation='nearest', aspect='auto')
-        ax4.set_xlabel('Rich Club Node Index', fontsize=12, color='white')
-        ax4.set_ylabel('Rich Club Node Index', fontsize=12, color='white')
-        ax4.set_title('Rich Club Connectivity Matrix', fontsize=14, fontweight='bold', color='white')
-        ax4.tick_params(colors='white')
+        ax4.set_xlabel('Rich Club Node Index', fontsize=12, color=text_color)
+        ax4.set_ylabel('Rich Club Node Index', fontsize=12, color=text_color)
+        ax4.set_title('Rich Club Connectivity Matrix', fontsize=14, fontweight='bold', color=text_color)
+        ax4.tick_params(colors=text_color)
 
         # Add colorbar
         cbar = plt.colorbar(im, ax=ax4)
-        cbar.set_label('Connection', color='white')
-        cbar.ax.yaxis.set_tick_params(color='white')
-        plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white')
+        cbar.set_label('Connection', color=text_color)
+        cbar.ax.yaxis.set_tick_params(color=text_color)
+        plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color=text_color)
 
         # Calculate connectivity density
         density = np.sum(rc_adj) / (len(rich_club_nodes) * (len(rich_club_nodes) - 1))
         ax4.text(0.05, 0.95, f"Density: {density:.3f}", transform=ax4.transAxes,
                 fontsize=10, verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='#2a2a2a', alpha=0.8),
-                color='white')
+                bbox=dict(boxstyle='round', facecolor=box_color, alpha=0.8),
+                color=text_color)
     else:
         ax4.text(0.5, 0.5, f'Too many rich club nodes\nto display matrix\n(n={len(rich_club_nodes)})',
                 transform=ax4.transAxes, ha='center', va='center',
-                fontsize=12, color='white')
-        ax4.set_title('Rich Club Connectivity Matrix', fontsize=14, fontweight='bold', color='white')
+                fontsize=12, color=text_color)
+        ax4.set_title('Rich Club Connectivity Matrix', fontsize=14, fontweight='bold', color=text_color)
         ax4.axis('off')
 
     # --- SUBPLOT 5: Degree vs Connections Statistics ---
     ax5 = fig.add_subplot(gs[2, 1])
-    ax5.set_facecolor('#0a0a0a')
+    ax5.set_facecolor(subplot_bg_color)
 
     # Calculate edge density for each degree
     degree_edge_density = {}
@@ -1098,22 +1166,22 @@ def visualize_rich_club_distribution(network, save_path="rich_club_analysis.png"
         colors = ['#ff6b6b' if target_min <= k <= target_max else '#54a0ff'
                   for k in k_vals]
 
-        ax5.bar(k_vals, density_vals, color=colors, edgecolor='white',
+        ax5.bar(k_vals, density_vals, color=colors, edgecolor=text_color,
                linewidth=0.5, alpha=0.8)
         ax5.axvspan(target_min, target_max, alpha=0.2, color='yellow')
-        ax5.set_xlabel('Degree (k)', fontsize=12, color='white')
-        ax5.set_ylabel('Intra-degree Edge Density', fontsize=12, color='white')
+        ax5.set_xlabel('Degree (k)', fontsize=12, color=text_color)
+        ax5.set_ylabel('Intra-degree Edge Density', fontsize=12, color=text_color)
         ax5.set_title('Edge Density Among Same-Degree Nodes',
-                     fontsize=14, fontweight='bold', color='white')
+                     fontsize=14, fontweight='bold', color=text_color)
         ax5.grid(True, alpha=0.3)
-        ax5.tick_params(colors='white')
+        ax5.tick_params(colors=text_color)
     else:
         ax5.text(0.5, 0.5, 'Insufficient data\nfor edge density',
                 transform=ax5.transAxes, ha='center', va='center',
-                fontsize=12, color='white')
+                fontsize=12, color=text_color)
 
     # Save figure
-    plt.savefig(save_path, dpi=300, facecolor='#1a1a1a', bbox_inches='tight')
+    plt.savefig(save_path, dpi=300, facecolor=bg_color, bbox_inches='tight')
     print(f"Rich club visualization saved to {save_path}")
 
     # Prepare results

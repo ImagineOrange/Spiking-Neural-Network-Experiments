@@ -2,16 +2,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
-# Set dark style for plots
-plt.style.use('dark_background')
+# Default: do NOT set dark style globally - let functions handle it based on darkstyle parameter
 
 
-def plot_reversal_effects(network, neuron_data, selected_neuron, stim_times=None, dt=0.1, 
-                           save_path="reversal_effects.png"):
+def plot_reversal_effects(network, neuron_data, selected_neuron, stim_times=None, dt=0.1,
+                           save_path="reversal_effects.png", darkstyle=True):
     """
     Create a detailed visualization showing how reversal potentials affect synaptic currents
     for a selected neuron. This function highlights the reversal potential mechanism.
-    
+
     Parameters:
     -----------
     network : ExtendedNeuronalNetworkWithReversal
@@ -26,7 +25,20 @@ def plot_reversal_effects(network, neuron_data, selected_neuron, stim_times=None
         Time step size in ms
     save_path : str
         Path to save the visualization
+    darkstyle : bool
+        If True, use dark background style. If False, use white background (default: True)
     """
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        text_color = 'white'
+        zero_line_color = 'white'
+        rest_line_color = 'white'
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        zero_line_color = 'black'
+        rest_line_color = 'gray'
     if selected_neuron not in neuron_data:
         print(f"Error: Neuron {selected_neuron} not found in neuron_data")
         return None
@@ -52,7 +64,7 @@ def plot_reversal_effects(network, neuron_data, selected_neuron, stim_times=None
     time = np.arange(n_steps) * dt
     
     # Create figure with multiple panels
-    fig = plt.figure(figsize=(14, 10), dpi=150, facecolor='#1a1a1a')
+    fig = plt.figure(figsize=(14, 10), dpi=150, facecolor=bg_color)
     gs = GridSpec(4, 1, height_ratios=[3, 2, 2, 2], hspace=0.3, figure=fig)
     
     # Define colors
@@ -65,8 +77,8 @@ def plot_reversal_effects(network, neuron_data, selected_neuron, stim_times=None
     ap_color = '#FFD700'          # Gold for action potentials
     
     neuron_type = "Inhibitory" if is_inhibitory else "Excitatory"
-    fig.suptitle(f"Reversal Potential Effects - Neuron {selected_neuron} ({neuron_type})", 
-                fontsize=16, color='white')
+    fig.suptitle(f"Reversal Potential Effects - Neuron {selected_neuron} ({neuron_type})",
+                fontsize=16, color=text_color)
     
     # PANEL 1: Membrane Potential
     ax1 = fig.add_subplot(gs[0])
@@ -77,7 +89,7 @@ def plot_reversal_effects(network, neuron_data, selected_neuron, stim_times=None
     # Plot threshold and rest potentials
     ax1.axhline(y=v_threshold, color='purple', linestyle='--', 
               linewidth=1.0, alpha=0.7, label="Threshold")
-    ax1.axhline(y=v_rest, color='white', linestyle=':', 
+    ax1.axhline(y=v_rest, color=rest_line_color, linestyle=':',
               linewidth=1.0, alpha=0.4, label="Rest")
     
     # Plot reversal potentials
@@ -97,8 +109,8 @@ def plot_reversal_effects(network, neuron_data, selected_neuron, stim_times=None
             ax1.axvline(x=stim_time, color='green', linestyle='-.',
                       linewidth=1.0, alpha=0.5)
     
-    ax1.set_ylabel("Membrane Potential (mV)", color='white')
-    ax1.set_title("Membrane Potential and Reversal Potentials", color='white')
+    ax1.set_ylabel("Membrane Potential (mV)", color=text_color)
+    ax1.set_title("Membrane Potential and Reversal Potentials", color=text_color)
     ax1.legend(loc='upper right', framealpha=0.7)
     
     # PANEL 2: Synaptic Conductances
@@ -109,12 +121,12 @@ def plot_reversal_effects(network, neuron_data, selected_neuron, stim_times=None
     g_e_scaled = g_e_history * scale_factor
     g_i_scaled = g_i_history * scale_factor
     
-    ax2.plot(time, g_e_scaled, color=g_e_color, linewidth=1.5, 
+    ax2.plot(time, g_e_scaled, color=g_e_color, linewidth=1.5,
             label="Excitatory Conductance (g_e)")
-    ax2.plot(time, g_i_scaled, color=g_i_color, linewidth=1.5, 
+    ax2.plot(time, g_i_scaled, color=g_i_color, linewidth=1.5,
             label="Inhibitory Conductance (g_i)")
-    ax2.set_ylabel("Conductance (scaled)", color='white')
-    ax2.set_title("Synaptic Conductances", color='white')
+    ax2.set_ylabel("Conductance (scaled)", color=text_color)
+    ax2.set_title("Synaptic Conductances", color=text_color)
     ax2.legend(loc='upper right', framealpha=0.7)
     
     # PANEL 3: Synaptic Currents
@@ -137,11 +149,11 @@ def plot_reversal_effects(network, neuron_data, selected_neuron, stim_times=None
     ax3.plot(time, i_total_scaled, color=i_syn_color, linewidth=1.5, 
             label="Total Current (scaled)")
     
-    ax3.axhline(y=0, color='white', linestyle='-', 
+    ax3.axhline(y=0, color=zero_line_color, linestyle='-',
               linewidth=0.5, alpha=0.5)
     
-    ax3.set_ylabel("Current (scaled)", color='white')
-    ax3.set_title("Synaptic Currents", color='white')
+    ax3.set_ylabel("Current (scaled)", color=text_color)
+    ax3.set_title("Synaptic Currents", color=text_color)
     ax3.legend(loc='upper right', framealpha=0.7)
     
     # PANEL 4: Current-Voltage Relationship
@@ -162,23 +174,23 @@ def plot_reversal_effects(network, neuron_data, selected_neuron, stim_times=None
     ax4.plot(time, i_driving_scaled, color=i_i_color, linewidth=1.5, 
             label="I-channel Driving Force (scaled)")
     
-    ax4.axhline(y=0, color='white', linestyle='-', 
+    ax4.axhline(y=0, color=zero_line_color, linestyle='-',
               linewidth=0.5, alpha=0.5)
     
-    ax4.set_xlabel("Time (ms)", color='white')
-    ax4.set_ylabel("Driving Force (scaled)", color='white')
-    ax4.set_title("Synaptic Driving Forces", color='white')
+    ax4.set_xlabel("Time (ms)", color=text_color)
+    ax4.set_ylabel("Driving Force (scaled)", color=text_color)
+    ax4.set_title("Synaptic Driving Forces", color=text_color)
     ax4.legend(loc='upper right', framealpha=0.7)
-    
-    # Apply dark theme styling to all panels
+
+    # Apply theme styling to all panels based on darkstyle
     for ax in [ax1, ax2, ax3, ax4]:
-        ax.set_facecolor('#1a1a1a')
-        ax.tick_params(colors='white')
+        ax.set_facecolor(bg_color)
+        ax.tick_params(colors=text_color)
         for spine in ax.spines.values():
-            spine.set_color('white')
+            spine.set_color(text_color)
         ax.grid(True, alpha=0.3)
-        ax.xaxis.label.set_color('white')
-        ax.yaxis.label.set_color('white')
+        ax.xaxis.label.set_color(text_color)
+        ax.yaxis.label.set_color(text_color)
     
     # Save figure
     plt.tight_layout()

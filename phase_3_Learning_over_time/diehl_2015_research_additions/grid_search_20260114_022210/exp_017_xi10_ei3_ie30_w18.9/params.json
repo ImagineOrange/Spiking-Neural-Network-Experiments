@@ -1,0 +1,18 @@
+{
+  "pConn_ei_input": 0.1,
+  "pConn_ei": 0.03,
+  "pConn_ie": 0.3,
+  "weight_ie": 18.89,
+  "n_e": 400,
+  "n_i": 100,
+  "n_input": 784,
+  "weight_ei": 10.4,
+  "pConn_ee_input": 1.0,
+  "_i_per_e_spike": 3.0,
+  "_inhib_drive": 17.0,
+  "_overlap": 65.7,
+  "_ei_ratio": "400:100",
+  "seed": 59,
+  "base_seed": 42,
+  "exp_id": 17
+}

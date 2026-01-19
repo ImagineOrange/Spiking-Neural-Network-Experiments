@@ -3,17 +3,16 @@ import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 from matplotlib.colors import LinearSegmentedColormap
 
-# Set dark style for plots to match existing visualization style
-plt.style.use('dark_background')
+# Default: do NOT set dark style globally - let functions handle it based on darkstyle parameter
 
-def calculate_correlation_length(network, activity_record, dt=0.1, distance_bins=5, plot=True, 
-                           time_window=None, use_covariance=False, save_path=None):
+def calculate_correlation_length(network, activity_record, dt=0.1, distance_bins=5, plot=True,
+                           time_window=None, use_covariance=False, save_path=None, darkstyle=True):
     """
     Calculate the correlation length in a neuronal network based on activity records.
-    
+
     Correlation length (ξ) measures how far correlations extend spatially in the system.
     In critical systems, correlation length tends to increase significantly.
-    
+
     Parameters:
     -----------
     network : ExtendedNeuronalNetworkWithReversal
@@ -28,12 +27,23 @@ def calculate_correlation_length(network, activity_record, dt=0.1, distance_bins
         Whether to generate visualizations
     save_path : str or None
         Path to save the visualization
-        
+    darkstyle : bool
+        If True, use dark background style. If False, use white background (default: True)
+
     Returns:
     --------
     dict
         Dictionary containing correlation length and related metrics
     """
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        text_color = 'white'
+        box_color = '#222222'
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        box_color = '#eeeeee'
     # 1. Create activity time series for each neuron
     n_steps = len(activity_record)
     n_neurons = network.n_neurons
@@ -152,7 +162,7 @@ def calculate_correlation_length(network, activity_record, dt=0.1, distance_bins
             
             # Create visualization if requested
             if plot:
-                fig, ax = plt.subplots(figsize=(10, 8), facecolor='#1a1a1a')
+                fig, ax = plt.subplots(figsize=(10, 8), facecolor=bg_color)
                 
                 # Plot data points with error bars
                 ax.errorbar(distance_centers, mean_correlations, yerr=std_correlations,
@@ -174,10 +184,10 @@ def calculate_correlation_length(network, activity_record, dt=0.1, distance_bins
                     ax.axvspan(0, xi_fit, alpha=0.2, color='#ff9f43')
                 
                 # Style the plot
-                ax.set_xlabel('Distance (grid units)', color='white', fontsize=14)
-                ax.set_ylabel('Correlation', color='white', fontsize=14)
+                ax.set_xlabel('Distance (grid units)', color=text_color, fontsize=14)
+                ax.set_ylabel('Correlation', color=text_color, fontsize=14)
                 ax.set_title('Spatial Correlation Function and Correlation Length', 
-                            color='white', fontsize=16)
+                            color=text_color, fontsize=16)
                 
                 # Add text with fit parameters
                 text = f"Correlation Length (ξ) = {xi_fit:.2f}\n"
@@ -186,16 +196,16 @@ def calculate_correlation_length(network, activity_record, dt=0.1, distance_bins
                 text += f"R² = {r_squared:.3f}"
                 
                 ax.text(0.97, 0.97, text, transform=ax.transAxes, fontsize=12,
-                       va='top', ha='right', color='white',
-                       bbox=dict(facecolor='#222222', alpha=0.7, boxstyle='round'))
+                       va='top', ha='right', color=text_color,
+                       bbox=dict(facecolor=box_color, alpha=0.7, boxstyle='round'))
                 
                 # Style improvements
-                ax.set_facecolor('#1a1a1a')
-                ax.tick_params(colors='white')
+                ax.set_facecolor(bg_color)
+                ax.tick_params(colors=text_color)
                 ax.grid(True, alpha=0.3)
-                
+
                 for spine in ax.spines.values():
-                    spine.set_color('white')
+                    spine.set_color(text_color)
                 
                 ax.legend(loc='upper right', framealpha=0.7)
                 
@@ -242,20 +252,53 @@ def calculate_correlation_length(network, activity_record, dt=0.1, distance_bins
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
-import seaborn as sns
 
-def visualize_spatial_correlations(network, activity_record, time_bin_ms=10, dt=0.1, 
-                                  distance_bins=10, save_prefix="spatial_correlation_map.png"):
-    
+def visualize_spatial_correlations(network, activity_record, time_bin_ms=10, dt=0.1,
+                                  distance_bins=10, save_prefix="spatial_correlation_map.png", darkstyle=True):
+    """
+    Visualize spatial correlations in the network.
+
+    Parameters:
+    -----------
+    darkstyle : bool
+        If True, use dark background style. If False, use white background (default: True)
+    """
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        text_color = 'white'
+        box_color = '#222222'
+        scatter_point_color = 'white'
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        box_color = '#eeeeee'
+        scatter_point_color = 'black'
+
     print("Computing spatial correlation data...")
-    
+
     # Convert activity record to time-binned matrix
     n_steps = len(activity_record)
     n_neurons = network.n_neurons
+
+    # Calculate initial bin parameters
     n_bins = int(n_steps * dt / time_bin_ms)
     bin_size_steps = int(time_bin_ms / dt)
-    
-    print(f"Time bins: {n_bins}, bin size: {bin_size_steps} steps")
+
+    # Ensure we have enough time bins for meaningful correlation analysis
+    # Need at least 5 bins to calculate correlations reliably
+    min_bins_required = 5
+    if n_bins < min_bins_required:
+        # Automatically adjust time_bin_ms to get enough bins
+        total_time_ms = n_steps * dt
+        adjusted_time_bin_ms = total_time_ms / min_bins_required
+        print(f"Warning: time_bin_ms={time_bin_ms}ms too large for {total_time_ms:.1f}ms simulation.")
+        print(f"Adjusting time_bin_ms to {adjusted_time_bin_ms:.1f}ms to get {min_bins_required} bins.")
+        time_bin_ms = adjusted_time_bin_ms
+        n_bins = min_bins_required
+        bin_size_steps = int(time_bin_ms / dt)
+
+    print(f"Time bins: {n_bins}, bin size: {bin_size_steps} steps ({time_bin_ms:.1f}ms per bin)")
     
     # Create binned activity matrix
     binned_activity = np.zeros((n_bins, n_neurons))
@@ -368,7 +411,7 @@ def visualize_spatial_correlations(network, activity_record, time_bin_ms=10, dt=
     correlation_length = None
     
     # 1. FIGURE 1: Correlation vs Distance scatter plot
-    fig_scatter = plt.figure(figsize=(12, 7), facecolor='#1a1a1a')
+    fig_scatter = plt.figure(figsize=(12, 7), facecolor=bg_color)
     ax_scatter = fig_scatter.add_subplot(111)
     
     # Create a scatter plot with density coloring
@@ -397,33 +440,33 @@ def visualize_spatial_correlations(network, activity_record, time_bin_ms=10, dt=
     
     # Add colorbar
     cbar = plt.colorbar(im, ax=ax_scatter)
-    cbar.set_label('Pair Count', color='white', fontsize=12)
-    cbar.ax.tick_params(colors='white')
-    
+    cbar.set_label('Pair Count', color=text_color, fontsize=12)
+    cbar.ax.tick_params(colors=text_color)
+
     # Add scatter plot with low alpha
-    ax_scatter.scatter(distance_values, correlation_values, s=3, color='white', alpha=0.05)
+    ax_scatter.scatter(distance_values, correlation_values, s=3, color=scatter_point_color, alpha=0.05)
     
     # Style the plot
-    ax_scatter.set_xlabel('Distance (grid units)', color='white', fontsize=14)
-    ax_scatter.set_ylabel('Correlation', color='white', fontsize=14)
-    ax_scatter.set_title('Neuron Pair Correlations vs Distance', color='white', fontsize=16)
-    ax_scatter.set_facecolor('#1a1a1a')
-    ax_scatter.tick_params(colors='white')
+    ax_scatter.set_xlabel('Distance (grid units)', color=text_color, fontsize=14)
+    ax_scatter.set_ylabel('Correlation', color=text_color, fontsize=14)
+    ax_scatter.set_title('Neuron Pair Correlations vs Distance', color=text_color, fontsize=16)
+    ax_scatter.set_facecolor(bg_color)
+    ax_scatter.tick_params(colors=text_color)
     ax_scatter.grid(True, alpha=0.3)
     
     for spine in ax_scatter.spines.values():
-        spine.set_color('white')
+        spine.set_color(text_color)
     
     plt.tight_layout()
     
     # Save Figure 1
     scatter_path = f"{save_prefix}_scatter.png"
-    fig_scatter.savefig(scatter_path, dpi=300, bbox_inches='tight', facecolor='#1a1a1a')
+    fig_scatter.savefig(scatter_path, dpi=300, bbox_inches='tight', facecolor=bg_color)
     print(f"Saved correlation scatter plot to {scatter_path}")
     plt.close(fig_scatter)
     
     # 2. FIGURE 2: Mean correlation vs distance with error bars
-    fig_mean = plt.figure(figsize=(12, 7), facecolor='#1a1a1a')
+    fig_mean = plt.figure(figsize=(12, 7), facecolor=bg_color)
     ax_mean = fig_mean.add_subplot(111)
     
     ax_mean.errorbar(distance_centers, mean_correlations, yerr=std_correlations,
@@ -469,8 +512,8 @@ def visualize_spatial_correlations(network, activity_record, time_bin_ms=10, dt=
             text += f"Offset (B) = {B_fit:.3f}"
             
             ax_mean.text(0.97, 0.97, text, transform=ax_mean.transAxes, fontsize=12,
-                        va='top', ha='right', color='white',
-                        bbox=dict(facecolor='#222222', alpha=0.7, boxstyle='round'))
+                        va='top', ha='right', color=text_color,
+                        bbox=dict(facecolor=box_color, alpha=0.7, boxstyle='round'))
             
             correlation_length = xi_fit
             
@@ -480,31 +523,31 @@ def visualize_spatial_correlations(network, activity_record, time_bin_ms=10, dt=
             print(f"Error fitting correlation function: {e}")
     
     # Style the plot
-    ax_mean.set_xlabel('Distance (grid units)', color='white', fontsize=14)
-    ax_mean.set_ylabel('Mean Correlation', color='white', fontsize=14)
-    ax_mean.set_title('Mean Correlation vs Distance', color='white', fontsize=16)
-    ax_mean.set_facecolor('#1a1a1a')
-    ax_mean.tick_params(colors='white')
+    ax_mean.set_xlabel('Distance (grid units)', color=text_color, fontsize=14)
+    ax_mean.set_ylabel('Mean Correlation', color=text_color, fontsize=14)
+    ax_mean.set_title('Mean Correlation vs Distance', color=text_color, fontsize=16)
+    ax_mean.set_facecolor(bg_color)
+    ax_mean.tick_params(colors=text_color)
     ax_mean.grid(True, alpha=0.3)
     
     for spine in ax_mean.spines.values():
-        spine.set_color('white')
+        spine.set_color(text_color)
     
     # Add counts info
     bin_info = f"Bin counts: {', '.join([f'{int(c)}' for c in counts])}"
     ax_mean.text(0.5, -0.1, bin_info, transform=ax_mean.transAxes, fontsize=10,
-                ha='center', va='center', color='white')
+                ha='center', va='center', color=text_color)
     
     plt.tight_layout()
     
     # Save Figure 2
     mean_path = f"{save_prefix}_mean.png"
-    fig_mean.savefig(mean_path, dpi=300, bbox_inches='tight', facecolor='#1a1a1a')
+    fig_mean.savefig(mean_path, dpi=300, bbox_inches='tight', facecolor=bg_color)
     print(f"Saved mean correlation plot to {mean_path}")
     plt.close(fig_mean)
     
     # 3. FIGURE 3: Correlation matrix heatmap
-    fig_heatmap = plt.figure(figsize=(12, 7), facecolor='#1a1a1a')
+    fig_heatmap = plt.figure(figsize=(12, 7), facecolor=bg_color)
     ax_heatmap = fig_heatmap.add_subplot(111)
     
     # Sample a manageable number of neurons for visualization
@@ -533,27 +576,27 @@ def visualize_spatial_correlations(network, activity_record, time_bin_ms=10, dt=
     
     # Add colorbar
     cbar = plt.colorbar(im, ax=ax_heatmap)
-    cbar.set_label('Correlation', color='white', fontsize=12)
-    cbar.ax.tick_params(colors='white')
+    cbar.set_label('Correlation', color=text_color, fontsize=12)
+    cbar.ax.tick_params(colors=text_color)
     
     # Style the plot
     ax_heatmap.set_title('Correlation Matrix Heatmap (Sample of Neurons)', 
-                        color='white', fontsize=16)
-    ax_heatmap.set_facecolor('#1a1a1a')
-    ax_heatmap.tick_params(colors='white', labelsize=8)
+                        color=text_color, fontsize=16)
+    ax_heatmap.set_facecolor(bg_color)
+    ax_heatmap.tick_params(colors=text_color, labelsize=8)
     
     # Optional: create a cleaner look by removing tick labels
     ax_heatmap.set_xticks([])
     ax_heatmap.set_yticks([])
     
     for spine in ax_heatmap.spines.values():
-        spine.set_color('white')
+        spine.set_color(text_color)
     
     plt.tight_layout()
     
     # Save Figure 3
     heatmap_path = f"{save_prefix}_heatmap.png"
-    fig_heatmap.savefig(heatmap_path, dpi=300, bbox_inches='tight', facecolor='#1a1a1a')
+    fig_heatmap.savefig(heatmap_path, dpi=300, bbox_inches='tight', facecolor=bg_color)
     print(f"Saved correlation matrix heatmap to {heatmap_path}")
     plt.close(fig_heatmap)
     

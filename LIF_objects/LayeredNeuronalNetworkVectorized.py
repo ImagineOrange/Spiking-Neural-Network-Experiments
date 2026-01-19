@@ -55,14 +55,13 @@ class LayeredNeuronalNetworkVectorized:
         self.v_threshold = get_param('v_threshold', -55.0)
         self.v_reset = get_param('v_reset', -75.0)
         self.tau_m = get_param('tau_m', 10.0)
-        self.tau_ref = get_param('tau_ref', 2.0)
         self.tau_e = get_param('tau_e', 3.0)
         self.tau_i = get_param('tau_i', 7.0)
         self.e_reversal = get_param('e_reversal', 0.0)
         self.i_reversal = get_param('i_reversal', -70.0)
         self.v_noise_amp = get_param('v_noise_amp', 0.5)
         self.i_noise_amp = get_param('i_noise_amp', 0.05)
-        self.adaptation_increment = get_param('adaptation_increment', 0.3)
+        self.adaptation_increment = get_param('adaptation_increment', 0.2)
         self.tau_adaptation = get_param('tau_adaptation', 100.0)
 
         # Inhibitory status (must be provided as a boolean array/list)
@@ -70,6 +69,16 @@ class LayeredNeuronalNetworkVectorized:
         if is_inhib_param is None or len(is_inhib_param) != n_neurons:
              raise ValueError(f"'is_inhibitory' must be provided as array/list of size {n_neurons}")
         self.is_inhibitory = np.array(is_inhib_param, dtype=bool)
+
+        # Set biologically plausible refractory period based on neuron type if not specified
+        # Excitatory (regular-spiking pyramidal): ~4ms, max ~250 Hz
+        # Inhibitory (fast-spiking interneuron): ~2.5ms, max ~400 Hz
+        tau_ref_param = kwargs.get('tau_ref', None)
+        if tau_ref_param is None:
+            # Default based on neuron type: 2.5ms for inhibitory, 4.0ms for excitatory
+            self.tau_ref = np.where(self.is_inhibitory, 2.5, 4.0)
+        else:
+            self.tau_ref = get_param('tau_ref', 2.0)
 
         # --- Neuron State Variables (Initialize as NumPy arrays) ---
         self.v = np.full(n_neurons, self.v_rest, dtype=float)

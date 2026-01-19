@@ -306,15 +306,11 @@ if __name__ == "__main__":
     # --- Neuron Parameters (Dictionary) ---
     neuron_config = {
         'v_rest': -65.0, 'v_threshold': -55.0, 'v_reset': -75.0, # Basic LIF params (mV)
-        'tau_m': 10.0, 'tau_ref': 1.5, 'tau_e': 3.0, 'tau_i': 7.0, # Time constants (ms)
+        'tau_m': 10.0, 'tau_ref': None, 'tau_e': 3.0, 'tau_i': 7.0, # Time constants (ms) - tau_ref=None uses class defaults
         'e_reversal': 0.0, 'i_reversal': -70.0,                 # Reversal potentials (mV)
         'v_noise_amp': 0.32, 'i_noise_amp': 0.04,              # Noise amplitudes
-        'adaptation_increment': 0.5, 'tau_adaptation': 100,    # Adaptation params
-        'weight_scale': 0.1, # Base scale factor for weights (might be overridden by weight_config)
-        # STD (Short-Term Depression) parameters
-        'std_enabled': False,  # Enable Short-Term Synaptic Depression (default: False)
-        'U': 0.3,              # STD utilization factor (fraction of resources released per spike)
-        'tau_d': 400.0         # STD recovery time constant in ms
+        # adaptation_increment and tau_adaptation use class defaults
+        'weight_scale': 0.1 # Base scale factor for weights (might be overridden by weight_config)
     }
 
     # --- Synaptic Weight Range ---

@@ -1,0 +1,28 @@
+{
+  "best_score": 0.6690184582461229,
+  "best_params": {
+    "connection_p": 0.2,
+    "weight_scale": 0.2,
+    "inhibitory_fraction": 0.2,
+    "transmission_delay": 2.0,
+    "distance_lambda": 0.1,
+    "v_noise_amp": 0.1,
+    "i_noise_amp": 0.01
+  },
+  "metrics": {
+    "branching_ratio": 0.983380749121289,
+    "scaling_exponent": 1.6570143060179177,
+    "correlation_length": 21.108681342663033,
+    "dynamic_range": 4.1192342893141465,
+    "mutual_info": 0.07838749867833171,
+    "avalanche_count": 559
+  },
+  "individual_scores": {
+    "branching": 0.9673078274582996,
+    "scaling": 0.7304981268218291,
+    "correlation_length": 0.11307645241896203,
+    "dynamic_range": 0.7754930498465338,
+    "mutual_info": 0.45461753548220646
+  },
+  "timestamp": "2026-01-18 15:51:21"
+}
