@@ -13,7 +13,8 @@ sys.path.insert(0, str(project_root))
 from LIF_objects.SphericalNeuronalNetwork import SphericalNeuronalNetwork
 from LIF_utils.simulation_utils import run_unified_simulation
 from LIF_utils.criticality_analysis_utils import plot_enhanced_criticality_analysis
-from LIF_utils.activity_vis_utils import plot_psth_and_raster, plot_ei_psth_and_raster
+from LIF_utils.activity_vis_utils import plot_psth_and_raster, plot_ei_psth_and_raster, plot_network_activation_percentage, plot_oscillation_frequency_analysis, plot_ei_frequency_analysis, plot_ei_synchrony_analysis
+from LIF_utils.network_vis_utils import visualize_distance_weights_3d, visualize_ie_distance_weights_3d
 
 
 def save_experiment_config(network, experiment_params, save_path="experiment_config.json"):
@@ -83,6 +84,7 @@ def save_experiment_config(network, experiment_params, save_path="experiment_con
         "n_neurons": network.n_neurons,
         "weight_scale": network.weight_scale,
         "distance_lambda": network.distance_lambda,
+        "lambda_decay_ie": network.lambda_decay_ie,
         "sphere_radius": network.sphere_radius,
         "v_noise_amp": network.v_noise_amp,
         "i_noise_amp": network.i_noise_amp,
@@ -122,12 +124,45 @@ def save_experiment_config(network, experiment_params, save_path="experiment_con
     return config
 
 
+def _build_stim_info_html(stim_info):
+    """Build HTML for stimulation regime info panel."""
+    if not stim_info:
+        return '<div id="stimInfo"><span class="label">Stim:</span> None</div>'
+
+    mode = stim_info.get('mode', 'unknown')
+    interval = stim_info.get('interval')
+    strength = stim_info.get('strength')
+    fraction = stim_info.get('fraction', 0)
+
+    lines = [f'<span class="label">Stim:</span> {mode}']
+
+    if interval:
+        lines.append(f'<span class="label">Interval:</span> {interval}ms')
+    if strength:
+        lines.append(f'<span class="label">Strength:</span> {strength}')
+    if fraction:
+        lines.append(f'<span class="label">Fraction:</span> {fraction*100:.0f}%')
+
+    if mode == 'Current Injection':
+        duration = stim_info.get('duration', 0)
+        lines.append(f'<span class="label">Duration:</span> {duration} steps')
+    elif mode == 'Poisson':
+        prob = stim_info.get('probability', 0)
+        dur = stim_info.get('poisson_duration', 1)
+        lines.append(f'<span class="label">Prob:</span> {prob}')
+        lines.append(f'<span class="label">Window:</span> {dur} steps')
+
+    return '<div id="stimInfo">' + '<br>'.join(lines) + '</div>'
+
+
 def create_threejs_3d_animation(network, activity_record, dt=0.1,
                                  save_path="spherical_activity.html",
                                  max_frames=500,
                                  decay_factor=0.8,
                                  sphere_opacity=0.2,
-                                 stimulation_record=None):
+                                 stimulation_record=None,
+                                 stim_info=None,
+                                 sparkle=False):
     """
     Create interactive 3D Three.js animation showing neural activity on a sphere.
     Allows smooth orbit/pan/zoom while animation plays.
@@ -150,6 +185,10 @@ def create_threejs_3d_animation(network, activity_record, dt=0.1,
         Opacity of the translucent sphere outline
     stimulation_record : dict or None
         Dictionary with 'times' and 'neurons' keys tracking stimulation events
+    stim_info : dict or None
+        Stimulation regime info: {mode, interval, strength, duration, probability, fraction}
+    sparkle : bool
+        If True, enable audio sonification with crystalline pings for E/I spikes
     """
     print(f"\nCreating 3D Three.js animation...")
 
@@ -289,6 +328,19 @@ def create_threejs_3d_animation(network, activity_record, dt=0.1,
             height: 12px;
             border-radius: 50%;
         }}
+        #stimInfo {{
+            position: absolute;
+            top: 120px;
+            right: 10px;
+            color: #aaa;
+            font-family: monospace;
+            font-size: 11px;
+            background: rgba(0,0,0,0.5);
+            padding: 8px 10px;
+            border-radius: 5px;
+            line-height: 1.4;
+        }}
+        #stimInfo .label {{ color: #888; }}
     </style>
 </head>
 <body>
@@ -298,9 +350,11 @@ def create_threejs_3d_animation(network, activity_record, dt=0.1,
         <div class="legend-item"><div class="legend-color" style="background: #3232ff;"></div> Inhibitory</div>
         <div class="legend-item"><div class="legend-color" style="background: #32ff32;"></div> Stimulated</div>
     </div>
+    {_build_stim_info_html(stim_info)}
     <div id="controls">
         <button id="playPauseBtn">Pause</button>
         <button id="rotateBtn">Stop Rotate</button>
+        {'<button id="soundBtn">Sound Off</button>' if sparkle else ''}
         <input type="range" id="slider" min="0" max="{len(sampled_activity)-1}" value="0">
         <span id="timeDisplay">0.0 ms</span>
     </div>
@@ -471,7 +525,7 @@ def create_threejs_3d_animation(network, activity_record, dt=0.1,
         let isPlaying = true;
         let isRotating = true;
         let lastFrameTime = 0;
-        const frameDelay = 40; // ~25fps
+        const frameDelay = 33; // ~30fps
         const rotationSpeed = 0.002; // Very slow rotation speed
 
         // UI elements
@@ -492,6 +546,48 @@ def create_threejs_3d_animation(network, activity_record, dt=0.1,
             controls.autoRotateSpeed = 0.69; // Very slow rotation
         }});
 
+        // Audio state and functions (sparkle mode)
+        const sparkleEnabled = {'true' if sparkle else 'false'};
+        let audioContext = null;
+        let soundEnabled = false;
+        let prevActivity = null;  // Track previous frame to detect new spikes
+
+        function initAudio() {{
+            if (!audioContext) {{
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }}
+        }}
+
+        function playPing(isInhib) {{
+            if (!soundEnabled || !audioContext) return;
+
+            const osc = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+
+            // Excitatory: 880Hz (A5), Inhibitory: 587Hz (D5, perfect 5th below)
+            osc.frequency.value = isInhib ? 587 : 880;
+            osc.type = 'sine';  // Pure tone for crystalline sound
+
+            // Quick attack, short decay for crystalline ping
+            const now = audioContext.currentTime;
+            gain.gain.setValueAtTime(0.015, now);  // Lower volume to prevent clipping with many pings
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+            osc.connect(gain);
+            gain.connect(audioContext.destination);
+            osc.start(now);
+            osc.stop(now + 0.12);
+        }}
+
+        if (sparkleEnabled) {{
+            const soundBtn = document.getElementById('soundBtn');
+            soundBtn.addEventListener('click', () => {{
+                initAudio();
+                soundEnabled = !soundEnabled;
+                soundBtn.textContent = soundEnabled ? 'Sound On' : 'Sound Off';
+            }});
+        }}
+
         slider.addEventListener('input', (e) => {{
             currentFrame = parseInt(e.target.value);
             updateNeurons(currentFrame);
@@ -506,6 +602,16 @@ def create_threejs_3d_animation(network, activity_record, dt=0.1,
             for (let i = 0; i < neuronCount; i++) {{
                 const intensity = activity[i];
                 const stimIntensity = stim[i];
+
+                // Sparkle: detect new spikes (intensity jumped to ~1.0 from lower value)
+                if (sparkleEnabled && soundEnabled && intensity > 0.95) {{
+                    const prevIntensity = prevActivity ? prevActivity[i] : 0;
+                    if (prevIntensity < 0.9) {{
+                        // This is a new spike - play ping
+                        playPing(isInhibitory[i]);
+                    }}
+                }}
+
                 if (intensity > 0.05) {{
                     // Check if this neuron was stimulated - show as green
                     if (stimIntensity > 0.05) {{
@@ -528,6 +634,9 @@ def create_threejs_3d_animation(network, activity_record, dt=0.1,
                     sizesAttr.array[i] = 0;
                 }}
             }}
+
+            // Store current activity for next frame comparison
+            prevActivity = activity;
 
             colorsAttr.needsUpdate = true;
             sizesAttr.needsUpdate = true;
@@ -905,19 +1014,32 @@ window.addEventListener('load', function() {
     return fig
 
 
-def run_spherical_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
+def run_spherical_experiment(n_neurons=100, connection_p=0.3, connection_probabilities=None,
+                              weight_scale=3.0,
                               duration=5000.0, dt=0.1, stim_interval=None, stim_interval_strength=10,
                               stim_fraction=0.01, transmission_delay=2.0, inhibitory_fraction=0.2,
                               stochastic_stim=True, layout='sphere', no_stimulation=False,
                               enable_noise=True, v_noise_amp=0.3, i_noise_amp=0.05,
                               e_reversal=0.0, i_reversal=-80.0, random_seed=42, distance_lambda=0.1,
+                              lambda_decay_ie=0.05,
                               animate=True, max_animation_frames=500,
                               # Stimulation mode parameters (only active when stochastic_stim=False and no_stimulation=False)
                               current_injection_stimulation=True,  # Sustained current for N timesteps
                               current_injection_duration=1,        # How many timesteps current is applied
                               poisson_process_stimulation=False,   # Probabilistic stim (only if current_injection=False)
                               poisson_process_probability=0.1,     # Per-timestep probability of firing during window
-                              poisson_process_duration=1):         # Window length in timesteps
+                              poisson_process_duration=1,          # Window length in timesteps
+                              # Neuron parameter jitter (0 = no jitter)
+                              # Voltage params: Gaussian std dev (mV)
+                              jitter_v_rest=0.0,                   # Resting potential jitter (mV, Gaussian)
+                              jitter_v_threshold=0.0,              # Threshold jitter (mV, Gaussian)
+                              # Time constants: Coefficient of variation (CV = σ/μ, log-normal)
+                              jitter_tau_m=0.0,                    # Membrane time constant CV (log-normal)
+                              jitter_tau_ref=0.0,                  # Refractory period CV (log-normal)
+                              jitter_tau_e=0.0,                    # Excitatory synaptic tau CV (log-normal)
+                              jitter_tau_i=0.0,                    # Inhibitory synaptic tau CV (log-normal)
+                              jitter_adaptation_increment=0.0,     # Adaptation increment CV (log-normal)
+                              jitter_tau_adaptation=0.0):          # Adaptation time constant CV (log-normal)
     """
     Run experiment with the 3D spherical network model.
 
@@ -926,7 +1048,12 @@ def run_spherical_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
     n_neurons : int
         Number of neurons in the network
     connection_p : float
-        Connection probability between neurons (0-1)
+        Default connection probability between neurons (0-1). Used as fallback
+        when connection_probabilities is not specified or partially specified.
+    connection_probabilities : dict or None
+        Per-connection-type probabilities. If provided, overrides connection_p.
+        Keys: 'ee' (E→E), 'ei' (E→I), 'ie' (I→E), 'ii' (I→I)
+        Example biological values: {'ee': 0.1, 'ei': 0.15, 'ie': 0.4, 'ii': 0.15}
     weight_scale : float
         Scale factor for synaptic weights
     duration : float
@@ -963,6 +1090,9 @@ def run_spherical_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
         Seed for random number generation to ensure reproducibility
     distance_lambda : float
         Distance decay constant for synaptic weights (higher values mean faster decay)
+    lambda_decay_ie : float
+        Distance decay constant specifically for inhibitory→excitatory connections
+        (default 0.05, meaning slower decay / longer range for I→E connections)
     animate : bool
         If True, generate a 3D Plotly animation of the neural activity
     max_animation_frames : int
@@ -995,6 +1125,7 @@ def run_spherical_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
     network = SphericalNeuronalNetwork(
         n_neurons=n_neurons,
         connection_p=connection_p,
+        connection_probabilities=connection_probabilities,
         weight_scale=weight_scale,
         spatial=True,
         transmission_delay=transmission_delay,
@@ -1004,13 +1135,34 @@ def run_spherical_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
         i_noise_amp=actual_i_noise,
         e_reversal=e_reversal,
         i_reversal=i_reversal,
-        distance_lambda=distance_lambda
+        distance_lambda=distance_lambda,
+        lambda_decay_ie=lambda_decay_ie,
+        # Neuron parameter jitter
+        jitter_v_rest=jitter_v_rest,
+        jitter_v_threshold=jitter_v_threshold,
+        jitter_tau_m=jitter_tau_m,
+        jitter_tau_ref=jitter_tau_ref,
+        jitter_tau_e=jitter_tau_e,
+        jitter_tau_i=jitter_tau_i,
+        jitter_adaptation_increment=jitter_adaptation_increment,
+        jitter_tau_adaptation=jitter_tau_adaptation
+    )
+
+    # Generate connection type distribution figure
+    network.plot_connection_type_distribution()
+
+    # Generate neuron parameter distribution histograms (shows jitter effects)
+    print("\nGenerating neuron parameter distribution histograms...")
+    network.plot_neuron_parameter_distributions(
+        save_path="neuron_parameter_distributions.png",
+        darkstyle=True
     )
 
     # Save experiment configuration
     experiment_params = {
         "n_neurons": n_neurons,
         "connection_p": connection_p,
+        "connection_probabilities": connection_probabilities,
         "weight_scale": weight_scale,
         "duration": duration,
         "dt": dt,
@@ -1029,13 +1181,22 @@ def run_spherical_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
         "i_reversal": i_reversal,
         "random_seed": random_seed,
         "distance_lambda": distance_lambda,
+        "lambda_decay_ie": lambda_decay_ie,
         "animate": animate,
         "max_animation_frames": max_animation_frames,
         "current_injection_stimulation": current_injection_stimulation,
         "current_injection_duration": current_injection_duration,
         "poisson_process_stimulation": poisson_process_stimulation,
         "poisson_process_probability": poisson_process_probability,
-        "poisson_process_duration": poisson_process_duration
+        "poisson_process_duration": poisson_process_duration,
+        "jitter_v_rest": jitter_v_rest,
+        "jitter_v_threshold": jitter_v_threshold,
+        "jitter_tau_m": jitter_tau_m,
+        "jitter_tau_ref": jitter_tau_ref,
+        "jitter_tau_e": jitter_tau_e,
+        "jitter_tau_i": jitter_tau_i,
+        "jitter_adaptation_increment": jitter_adaptation_increment,
+        "jitter_tau_adaptation": jitter_tau_adaptation
     }
     save_experiment_config(network, experiment_params, save_path="experiment_config.json")
 
@@ -1115,6 +1276,29 @@ def run_spherical_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
     # Extract stimulation times for plots
     stim_times = stimulation_record.get('times', []) if stimulation_record else []
 
+    # Build stim_info for HTML display
+    if no_stimulation:
+        stim_info = {'mode': 'None'}
+    elif current_injection_stimulation:
+        stim_info = {
+            'mode': 'Current Injection',
+            'interval': stim_interval,
+            'strength': stim_interval_strength,
+            'fraction': stim_fraction,
+            'duration': current_injection_duration
+        }
+    elif poisson_process_stimulation:
+        stim_info = {
+            'mode': 'Poisson',
+            'interval': stim_interval,
+            'strength': stim_interval_strength,
+            'fraction': stim_fraction,
+            'probability': poisson_process_probability,
+            'poisson_duration': poisson_process_duration
+        }
+    else:
+        stim_info = {'mode': 'Stochastic' if stochastic_stim else 'Unknown'}
+
     # Generate 3D Plotly animation
     if animate:
         print("\n=== Generating 3D visualization ===")
@@ -1126,7 +1310,9 @@ def run_spherical_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
             max_frames=max_animation_frames,
             decay_factor=0.8,
             sphere_opacity=0.05,
-            stimulation_record=stimulation_record
+            stimulation_record=stimulation_record,
+            stim_info=stim_info,
+            sparkle=True
         )
 
     # Generate PSTH and raster plot
@@ -1155,6 +1341,95 @@ def run_spherical_experiment(n_neurons=100, connection_p=0.3, weight_scale=3.0,
         stim_times=stim_times if stim_times else None
     )
 
+    # Generate network activation percentage plot
+    print("\nGenerating network activation percentage plot...")
+    plot_network_activation_percentage(
+        activity_record=activity_record,
+        n_neurons=n_neurons,
+        dt=dt,
+        stim_times=stim_times if stim_times else None,
+        window_ms=5.0,
+        save_path="network_activation.png",
+        figsize=(14, 6),
+        darkstyle=True
+    )
+
+    # Generate oscillation frequency analysis (gamma detection)
+    print("\nGenerating oscillation frequency analysis (gamma detection)...")
+    freq_fig, freq_info = plot_oscillation_frequency_analysis(
+        activity_record=activity_record,
+        dt=dt,
+        figsize=(14, 10),
+        dpi=150,
+        save_path="oscillation_frequency_analysis.png",
+        darkstyle=True
+    )
+
+    # Print gamma detection results
+    print(f"\nFrequency Analysis Results:")
+    print(f"  Peak frequency: {freq_info['peak_frequency_hz']:.1f} Hz")
+    print(f"  Dominant band: {freq_info['dominant_band']}")
+    print(f"  Gamma fraction: {freq_info['gamma_fraction']:.2%}")
+    print(f"  Gamma detected: {'YES' if freq_info['is_gamma'] else 'NO'}")
+
+    # Generate E/I frequency analysis (separate spectra for excitatory and inhibitory)
+    print("\nGenerating E/I frequency analysis...")
+    ei_freq_fig, ei_freq_info = plot_ei_frequency_analysis(
+        network=network,
+        activity_record=activity_record,
+        dt=dt,
+        figsize=(14, 8),
+        dpi=150,
+        save_path="ei_frequency_analysis.png",
+        darkstyle=True
+    )
+
+    # Print E/I frequency results
+    print(f"\nE/I Frequency Analysis Results:")
+    print(f"  Excitatory peak: {ei_freq_info['exc_peak_frequency_hz']:.1f} Hz {'(Gamma)' if ei_freq_info['exc_is_gamma'] else ''}")
+    print(f"  Inhibitory peak: {ei_freq_info['inh_peak_frequency_hz']:.1f} Hz {'(Gamma)' if ei_freq_info['inh_is_gamma'] else ''}")
+
+    # Generate E/I synchrony analysis (unique neurons vs total spikes at multiple timescales)
+    print("\nGenerating E/I synchrony analysis (multiscale)...")
+    sync_fig, sync_info = plot_ei_synchrony_analysis(
+        network=network,
+        activity_record=activity_record,
+        dt=dt,
+        figsize=(14, 12),
+        dpi=150,
+        save_path="ei_synchrony_analysis.png",
+        darkstyle=True
+    )
+
+    # Print synchrony results (using 10ms reference bin)
+    print(f"\nE/I Synchrony Analysis Results (at {sync_info['reference_bin_ms']}ms bins):")
+    print(f"  E mean burst index: {sync_info['exc_mean_burst_ref']:.2f}")
+    print(f"  I mean burst index: {sync_info['inh_mean_burst_ref']:.2f}")
+    print(f"  (burst_idx=1.0 → population sync, >1.0 → neurons firing multiple times)")
+
+    # Generate 3D distance-weight visualization for a sample neuron
+    print("\nGenerating 3D distance-weight visualization...")
+    neuron_to_visualize = 42 if n_neurons > 42 else 0
+    visualize_distance_weights_3d(
+        network=network,
+        neuron_idx=neuron_to_visualize,
+        save_path="distance_weights_3d.html"
+    )
+
+    # Generate 3D I→E distance-weight visualization (from one inhibitory neuron)
+    print("\nGenerating 3D I→E distance-weight visualization...")
+    # Find an inhibitory neuron to visualize
+    inhibitory_neuron_idx = None
+    for i in range(n_neurons):
+        if network.neurons[i].is_inhibitory:
+            inhibitory_neuron_idx = i
+            break
+    visualize_ie_distance_weights_3d(
+        network=network,
+        neuron_idx=inhibitory_neuron_idx,
+        save_path="ie_distance_weights_3d.html"
+    )
+
     print("\n=== Experiment complete ===")
 
     return network, activity_record, neuron_data, stimulation_record
@@ -1180,34 +1455,41 @@ def run_biologically_plausible_simulation(random_seed=42):
     """
     return run_spherical_experiment(
         # Network parameters (same as circular experiment)
-        n_neurons=2000,
-        connection_p=0.1,
-        weight_scale=0.2,
+        n_neurons=6000,
+        connection_p=0.1,  # Fallback default
+        connection_probabilities={  # Biological connection probabilities
+            'ee': 0.10,   # E→E: ~10% (local recurrent excitation)
+            'ei': 0.15,   # E→I: ~15-20% (feedforward to interneurons)
+            'ie': 0.35,   # I→E: ~40-50% (strong blanket inhibition)
+            'ii': 0.15,   # I→I: ~10-20% (interneuron networks)
+        },
+        weight_scale=0.3,
         inhibitory_fraction=0.20,
         transmission_delay=1,
-        distance_lambda=0.1,
+        distance_lambda=0.15, # Distance decay for all connection types (except I→E)
+        lambda_decay_ie=0.08,  # Slower decay for I→E connections (longer range inhibition)
 
         # Simulation parameters
-        duration=70,
+        duration=500, #ms
         dt=0.1,
 
         # Stimulation parameters
-        stim_interval=10,
-        stim_interval_strength=51,
-        stim_fraction=0.20,
+        stim_interval=100, # the interval beteeen stims
+        stim_interval_strength=10, # strength of each stim
+        stim_fraction=0.20, # fraction of total neurons to stimulate each interval
         no_stimulation=False,
         stochastic_stim=False,
 
         # Stimulation mode parameters
-        current_injection_stimulation=True,
-        current_injection_duration=20,
-        poisson_process_stimulation=False,
-        poisson_process_probability=0.1,
-        poisson_process_duration=1,
+        current_injection_stimulation=False, # Sustained current for N timesteps
+        current_injection_duration=200, # How many timesteps current is applied
+        poisson_process_stimulation=True,  # Probabilistic stim (only if current_injection=False)
+        poisson_process_probability=0.005, #per timestep probability of stim in stim_fraction neurons
+        poisson_process_duration=50,
 
         # Noise parameters
         enable_noise=True,
-        v_noise_amp=0.08,
+        v_noise_amp=0.6,
         i_noise_amp=0.003,
 
         # Reversal potential parameters
@@ -1218,7 +1500,19 @@ def run_biologically_plausible_simulation(random_seed=42):
         layout='sphere',
         random_seed=random_seed,
         animate=True,
-        max_animation_frames=700
+        max_animation_frames=5000,
+
+        # Neuron parameter jitter
+        # Voltage params: Gaussian (std dev in mV)
+        jitter_v_rest=3.0,              # ±3mV Gaussian jitter on resting potential
+        jitter_v_threshold=2.5,         # ±2.5mV Gaussian jitter on threshold
+        # Time constants: Log-normal (coefficient of variation, CV = σ/μ)
+        jitter_tau_m=0.3,               # 30% CV on membrane time constant
+        jitter_tau_ref=0.25,            # 25% CV on refractory period
+        jitter_tau_e=0.3,               # 30% CV on excitatory synaptic tau
+        jitter_tau_i=0.3,               # 30% CV on inhibitory synaptic tau
+        jitter_adaptation_increment=0.4, # 40% CV on adaptation increment
+        jitter_tau_adaptation=0.35      # 35% CV on adaptation time constant
     )
 
 

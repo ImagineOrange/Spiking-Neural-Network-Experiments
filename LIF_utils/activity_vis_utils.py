@@ -299,7 +299,7 @@ def plot_network_activity_with_stimuli(network, activity_record, stim_times=None
     # Mark stimulation times if provided
     if stim_times:
         for stim_time in stim_times:
-            ax.axvline(x=stim_time, color='#1dd1a1', linewidth=1.5, alpha=0.8, 
+            ax.axvline(x=stim_time, color='#1dd1a1', linewidth=1.0, alpha=0.15,
                       label=f"Stim at {stim_time}ms" if stim_time == stim_times[0] else "")
     
     # Mark avalanches
@@ -458,8 +458,8 @@ def plot_psth_and_raster(activity_record, stim_times=None, bin_size=10, dt=0.1,
     if stim_times:
         for stim_time in stim_times:
             # Draw vertical lines across both plots
-            ax_psth.axvline(x=stim_time, color='#32ff32', linewidth=1.0, alpha=0.4)
-            ax_raster.axvline(x=stim_time, color='#32ff32', linewidth=1.0, alpha=0.4)
+            ax_psth.axvline(x=stim_time, color='#32ff32', linewidth=0.8, alpha=0.15)
+            ax_raster.axvline(x=stim_time, color='#32ff32', linewidth=0.8, alpha=0.15)
     
     # Style the plots based on darkstyle
     for ax in [ax_psth, ax_raster]:
@@ -545,7 +545,7 @@ def Layered_plot_activity_and_layer_psth(network, activity_record, layer_indices
     # Mark stimulation times if provided
     if stim_times: # Should ideally be stimulation_record['pulse_starts']
         for stim_time in stim_times:
-            ax_overall.axvline(x=stim_time, color=stim_line_color, linestyle='--', linewidth=1.0, alpha=0.6)
+            ax_overall.axvline(x=stim_time, color=stim_line_color, linestyle='--', linewidth=0.8, alpha=0.15)
 
     # --- Plot Layer PSTHs ---
     psth_axes = [] # List to store PSTH axes for shared x-axis
@@ -706,7 +706,7 @@ def Layered_plot_layer_wise_raster(network, activity_record, layer_indices, dt=0
         # Mark stimulation times
         if stim_times: # Should ideally be stimulation_record['pulse_starts']
             for stim_time in stim_times:
-                ax_raster.axvline(x=stim_time, color=stim_line_color, linestyle='--', linewidth=0.3, alpha=0.3)
+                ax_raster.axvline(x=stim_time, color=stim_line_color, linestyle='--', linewidth=0.3, alpha=0.15)
 
         ax_raster.grid(True, alpha=0.15, axis='x') # Subtle vertical grid lines
 
@@ -1016,7 +1016,7 @@ def plot_ei_psth_and_raster(network, activity_record, bin_size=10, dt=0.1,
     if stim_times:
         for stim_time in stim_times:
             for ax in [ax_exc_psth, ax_exc_raster, ax_inh_psth, ax_inh_raster]:
-                ax.axvline(x=stim_time, color='#32ff32', linewidth=1.0, alpha=0.4)
+                ax.axvline(x=stim_time, color='#32ff32', linewidth=0.8, alpha=0.15)
 
     plt.tight_layout()
 
@@ -1254,3 +1254,559 @@ def plot_oscillation_frequency_analysis(activity_record, dt=0.1, figsize=(14, 10
     }
 
     return fig, freq_info
+
+
+def plot_ei_frequency_analysis(network, activity_record, dt=0.1, figsize=(14, 8), dpi=150,
+                                save_path="ei_frequency_analysis.png", darkstyle=False):
+    """
+    Perform separate frequency analysis on excitatory and inhibitory populations,
+    then plot both power spectra on the same axis for comparison.
+
+    Parameters:
+    -----------
+    network : CircularNeuronalNetwork or SphericalNeuronalNetwork
+        The network object containing neuron information
+    activity_record : list
+        List of lists containing active neuron indices at each time step
+    dt : float
+        Time step size in ms
+    figsize : tuple
+        Figure size (width, height) in inches
+    dpi : int
+        Figure resolution
+    save_path : str
+        Path to save the figure
+    darkstyle : bool
+        If True, use dark background style. If False, use white background
+
+    Returns:
+    --------
+    fig : matplotlib.figure.Figure
+        The figure object
+    freq_info : dict
+        Dictionary containing frequency analysis results for both populations
+    """
+    from scipy.fft import fft, fftfreq
+    from matplotlib.gridspec import GridSpec
+
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        text_color = 'white'
+        spine_color = 'white'
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        spine_color = 'black'
+
+    # Colors for E/I
+    exc_color = '#e74c3c'  # Red for excitatory
+    inh_color = '#3498db'  # Blue for inhibitory
+
+    # Identify excitatory and inhibitory neurons
+    exc_neurons = set()
+    inh_neurons = set()
+    for i, neuron in enumerate(network.neurons):
+        if neuron.is_inhibitory:
+            inh_neurons.add(i)
+        else:
+            exc_neurons.add(i)
+
+    print(f"Frequency analysis: {len(exc_neurons)} excitatory, {len(inh_neurons)} inhibitory neurons")
+
+    # Calculate activity time series for each population
+    n_samples = len(activity_record)
+    time_ms = np.arange(n_samples) * dt
+
+    # Count spikes per timestep for each population
+    exc_activity = np.zeros(n_samples, dtype=float)
+    inh_activity = np.zeros(n_samples, dtype=float)
+
+    for t, active_neurons in enumerate(activity_record):
+        for neuron_idx in active_neurons:
+            if neuron_idx in exc_neurons:
+                exc_activity[t] += 1
+            elif neuron_idx in inh_neurons:
+                inh_activity[t] += 1
+
+    # Sampling frequency in Hz
+    fs = 1000.0 / dt
+
+    # Detrend (remove mean)
+    exc_detrended = exc_activity - np.mean(exc_activity)
+    inh_detrended = inh_activity - np.mean(inh_activity)
+
+    # Compute FFT for both populations
+    exc_fft = fft(exc_detrended)
+    inh_fft = fft(inh_detrended)
+    freqs = fftfreq(n_samples, dt / 1000.0)
+
+    # Only take positive frequencies
+    positive_mask = freqs > 0
+    freqs_pos = freqs[positive_mask]
+
+    exc_power = np.abs(exc_fft[positive_mask]) ** 2
+    inh_power = np.abs(inh_fft[positive_mask]) ** 2
+
+    # Normalize each power spectrum by its own max
+    exc_power_norm = exc_power / np.max(exc_power) if np.max(exc_power) > 0 else exc_power
+    inh_power_norm = inh_power / np.max(inh_power) if np.max(inh_power) > 0 else inh_power
+
+    # Focus on neural oscillation frequencies (0-500 Hz)
+    freq_mask = freqs_pos <= 500
+    freqs_plot = freqs_pos[freq_mask]
+    exc_power_plot = exc_power_norm[freq_mask]
+    inh_power_plot = inh_power_norm[freq_mask]
+
+    # Find peak frequencies
+    exc_peak_idx = np.argmax(exc_power_plot)
+    inh_peak_idx = np.argmax(inh_power_plot)
+    exc_peak_freq = freqs_plot[exc_peak_idx]
+    inh_peak_freq = freqs_plot[inh_peak_idx]
+
+    # Create figure with GridSpec: time series on top, power spectrum below
+    fig = plt.figure(figsize=figsize, dpi=dpi, facecolor=bg_color)
+    gs = GridSpec(2, 1, height_ratios=[1, 2], hspace=0.25)
+
+    # --- Panel 1: Activity time series ---
+    ax_time = fig.add_subplot(gs[0])
+    ax_time.plot(time_ms, exc_activity, color=exc_color, linewidth=0.8, alpha=0.8, label='Excitatory')
+    ax_time.plot(time_ms, inh_activity, color=inh_color, linewidth=0.8, alpha=0.8, label='Inhibitory')
+    ax_time.set_xlabel('Time (ms)', color=text_color)
+    ax_time.set_ylabel('Spike Count', color=text_color)
+    ax_time.set_title('E/I Activity Time Series', color=text_color, fontsize=12)
+    ax_time.legend(loc='upper right', facecolor=bg_color, edgecolor=spine_color, labelcolor=text_color)
+
+    # --- Panel 2: Power Spectrum comparison ---
+    ax_fft = fig.add_subplot(gs[1])
+
+    # Plot both power spectra
+    ax_fft.plot(freqs_plot, exc_power_plot, color=exc_color, linewidth=2, alpha=0.9, label='Excitatory')
+    ax_fft.plot(freqs_plot, inh_power_plot, color=inh_color, linewidth=2, alpha=0.9, label='Inhibitory')
+
+    # Mark peak frequencies
+    ax_fft.axvline(x=exc_peak_freq, color=exc_color, linestyle='--', linewidth=1.5, alpha=0.7)
+    ax_fft.axvline(x=inh_peak_freq, color=inh_color, linestyle='--', linewidth=1.5, alpha=0.7)
+
+    # Add peak frequency annotations
+    ax_fft.text(exc_peak_freq + 5, 0.95, f'E peak: {exc_peak_freq:.1f} Hz',
+                color=exc_color, fontsize=10, fontweight='bold', verticalalignment='top')
+    ax_fft.text(inh_peak_freq + 5, 0.85, f'I peak: {inh_peak_freq:.1f} Hz',
+                color=inh_color, fontsize=10, fontweight='bold', verticalalignment='top')
+
+    ax_fft.set_xlabel('Frequency (Hz)', color=text_color, fontsize=12)
+    ax_fft.set_ylabel('Normalized Power', color=text_color, fontsize=12)
+    ax_fft.set_title('E/I Power Spectrum Comparison', color=text_color, fontsize=14)
+    ax_fft.legend(loc='upper right', facecolor=bg_color, edgecolor=spine_color, labelcolor=text_color)
+
+    # Add frequency band shading for reference
+    band_colors = {
+        'Gamma (30-100 Hz)': (30, 100, '#2ecc71', 0.1),
+        'High Gamma (100-500 Hz)': (100, 500, '#9b59b6', 0.05)
+    }
+    for band_name, (low, high, color, alpha) in band_colors.items():
+        ax_fft.axvspan(low, high, alpha=alpha, color=color, label=band_name)
+
+    # Style both axes
+    for ax in [ax_time, ax_fft]:
+        ax.set_facecolor(bg_color)
+        ax.tick_params(colors=text_color)
+        for spine in ax.spines.values():
+            spine.set_color(spine_color)
+        ax.grid(True, alpha=0.2)
+
+    # Determine gamma status for each population
+    def is_gamma_freq(freq):
+        return 30 <= freq <= 100
+
+    exc_is_gamma = is_gamma_freq(exc_peak_freq)
+    inh_is_gamma = is_gamma_freq(inh_peak_freq)
+
+    # Summary text
+    summary_lines = [
+        f"Excitatory peak: {exc_peak_freq:.1f} Hz {'(Gamma)' if exc_is_gamma else ''}",
+        f"Inhibitory peak: {inh_peak_freq:.1f} Hz {'(Gamma)' if inh_is_gamma else ''}",
+        f"Sampling rate: {fs:.0f} Hz"
+    ]
+    summary_text = '\n'.join(summary_lines)
+
+    fig.text(0.02, 0.02, summary_text, transform=fig.transFigure,
+             fontsize=10, color=text_color, verticalalignment='bottom',
+             bbox=dict(boxstyle='round', facecolor=bg_color, edgecolor=spine_color, alpha=0.8))
+
+    plt.tight_layout()
+
+    # Save the figure
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, bbox_inches='tight', facecolor=fig.get_facecolor())
+        print(f"Saved E/I frequency analysis to {save_path}")
+
+    # Return frequency info
+    freq_info = {
+        'exc_peak_frequency_hz': exc_peak_freq,
+        'inh_peak_frequency_hz': inh_peak_freq,
+        'exc_is_gamma': exc_is_gamma,
+        'inh_is_gamma': inh_is_gamma,
+        'sampling_rate_hz': fs
+    }
+
+    return fig, freq_info
+
+
+def plot_ei_synchrony_analysis(network, activity_record, dt=0.1,
+                                figsize=(14, 12), dpi=150,
+                                save_path="ei_synchrony_analysis.png", darkstyle=False):
+    """
+    Analyze population synchrony at multiple timescales by comparing unique neurons
+    firing vs total spikes per bin.
+
+    Key insight: With refractory periods (E: ~4ms, I: ~2.5ms), small bins will always
+    show sync_index ≈ 1.0. We need larger bins to detect bursting vs population sync.
+
+    Burst Index = total_spikes / unique_neurons
+    - burst_idx ≈ 1.0 → each neuron fires once per bin (population synchrony)
+    - burst_idx > 1.0 → neurons firing multiple times per bin (bursting)
+
+    At bin_size = 10ms spanning ~2-3 oscillation cycles at 240 Hz:
+    - If same neurons fire repeatedly → bursting (burst_idx >> 1)
+    - If different neurons each cycle → population sync (burst_idx ≈ cycles)
+
+    Parameters:
+    -----------
+    network : CircularNeuronalNetwork or SphericalNeuronalNetwork
+        The network object containing neuron information
+    activity_record : list
+        List of lists containing active neuron indices at each time step
+    dt : float
+        Time step size in ms
+    figsize : tuple
+        Figure size (width, height) in inches
+    dpi : int
+        Figure resolution
+    save_path : str
+        Path to save the figure
+    darkstyle : bool
+        If True, use dark background style. If False, use white background
+
+    Returns:
+    --------
+    fig : matplotlib.figure.Figure
+        The figure object
+    sync_info : dict
+        Dictionary containing synchrony analysis results at multiple timescales
+    """
+    from matplotlib.gridspec import GridSpec
+
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        text_color = 'white'
+        spine_color = 'white'
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        spine_color = 'black'
+
+    # Colors for E/I
+    exc_color = '#e74c3c'  # Red for excitatory
+    inh_color = '#3498db'  # Blue for inhibitory
+    unique_color = '#27ae60'  # Green for unique neurons
+
+    # Identify excitatory and inhibitory neurons
+    exc_neurons = set()
+    inh_neurons = set()
+    for i, neuron in enumerate(network.neurons):
+        if neuron.is_inhibitory:
+            inh_neurons.add(i)
+        else:
+            exc_neurons.add(i)
+
+    print(f"Synchrony analysis: {len(exc_neurons)} excitatory, {len(inh_neurons)} inhibitory neurons")
+
+    # Multiple bin sizes to capture different timescales
+    # Small bins (< refractory) won't show bursting; larger bins will
+    bin_sizes_ms = [2, 5, 10, 20, 40, 80]
+
+    n_timesteps = len(activity_record)
+    duration_ms = n_timesteps * dt
+
+    # Create figure with 3x2 grid for different bin sizes
+    fig = plt.figure(figsize=figsize, dpi=dpi, facecolor=bg_color)
+    gs = GridSpec(3, 2, hspace=0.35, wspace=0.25)
+
+    # Store results for each bin size
+    all_results = {}
+
+    for idx, bin_size_ms in enumerate(bin_sizes_ms):
+        ax = fig.add_subplot(gs[idx // 2, idx % 2])
+
+        steps_per_bin = max(1, int(bin_size_ms / dt))
+        n_bins = n_timesteps // steps_per_bin
+
+        # Arrays to store per-bin data
+        bin_times = np.zeros(n_bins)
+        exc_total_spikes = np.zeros(n_bins)
+        exc_unique_neurons = np.zeros(n_bins)
+        inh_total_spikes = np.zeros(n_bins)
+        inh_unique_neurons = np.zeros(n_bins)
+
+        # Process each bin
+        for bin_idx in range(n_bins):
+            start_step = bin_idx * steps_per_bin
+            end_step = min(start_step + steps_per_bin, n_timesteps)
+            bin_times[bin_idx] = (start_step + end_step) / 2 * dt  # Bin center time
+
+            # Collect all spikes in this bin
+            exc_spikes_in_bin = []
+            inh_spikes_in_bin = []
+
+            for t in range(start_step, end_step):
+                for neuron_idx in activity_record[t]:
+                    if neuron_idx in exc_neurons:
+                        exc_spikes_in_bin.append(neuron_idx)
+                    elif neuron_idx in inh_neurons:
+                        inh_spikes_in_bin.append(neuron_idx)
+
+            # Count total spikes and unique neurons
+            exc_total_spikes[bin_idx] = len(exc_spikes_in_bin)
+            exc_unique_neurons[bin_idx] = len(set(exc_spikes_in_bin))
+            inh_total_spikes[bin_idx] = len(inh_spikes_in_bin)
+            inh_unique_neurons[bin_idx] = len(set(inh_spikes_in_bin))
+
+        # Calculate burst index: total/unique (1.0 = no bursting, >1 = bursting)
+        exc_burst_idx = np.divide(exc_total_spikes, exc_unique_neurons,
+                                   out=np.ones_like(exc_total_spikes),
+                                   where=exc_unique_neurons > 0)
+        inh_burst_idx = np.divide(inh_total_spikes, inh_unique_neurons,
+                                   out=np.ones_like(inh_total_spikes),
+                                   where=inh_unique_neurons > 0)
+
+        # Mean burst index (only for bins with activity)
+        exc_mean_burst = np.mean(exc_burst_idx[exc_unique_neurons > 0]) if np.any(exc_unique_neurons > 0) else 1.0
+        inh_mean_burst = np.mean(inh_burst_idx[inh_unique_neurons > 0]) if np.any(inh_unique_neurons > 0) else 1.0
+
+        # Plot total spikes (solid) and unique neurons (dashed)
+        ax.plot(bin_times, exc_total_spikes, color=exc_color, linewidth=1.5, alpha=0.9, label='E total')
+        ax.plot(bin_times, exc_unique_neurons, color=exc_color, linewidth=1.5, alpha=0.9, linestyle='--', label='E unique')
+        ax.plot(bin_times, inh_total_spikes, color=inh_color, linewidth=1.5, alpha=0.9, label='I total')
+        ax.plot(bin_times, inh_unique_neurons, color=inh_color, linewidth=1.5, alpha=0.9, linestyle='--', label='I unique')
+
+        # Fill between to show the gap (bursting indicator)
+        ax.fill_between(bin_times, exc_unique_neurons, exc_total_spikes, alpha=0.15, color=exc_color)
+        ax.fill_between(bin_times, inh_unique_neurons, inh_total_spikes, alpha=0.15, color=inh_color)
+
+        # Title with burst index
+        ax.set_title(f'Bin: {bin_size_ms}ms | E burst: {exc_mean_burst:.2f}, I burst: {inh_mean_burst:.2f}',
+                     color=text_color, fontsize=10)
+        ax.set_xlabel('Time (ms)', color=text_color, fontsize=9)
+        ax.set_ylabel('Spike count', color=text_color, fontsize=9)
+
+        if idx == 0:
+            ax.legend(loc='upper right', facecolor=bg_color, edgecolor=spine_color,
+                      labelcolor=text_color, fontsize=8)
+
+        # Style
+        ax.set_facecolor(bg_color)
+        ax.tick_params(colors=text_color, labelsize=8)
+        for spine in ax.spines.values():
+            spine.set_color(spine_color)
+        ax.grid(True, alpha=0.2)
+
+        # Store results
+        all_results[bin_size_ms] = {
+            'bin_times': bin_times,
+            'exc_total_spikes': exc_total_spikes,
+            'exc_unique_neurons': exc_unique_neurons,
+            'exc_burst_idx': exc_burst_idx,
+            'exc_mean_burst': exc_mean_burst,
+            'inh_total_spikes': inh_total_spikes,
+            'inh_unique_neurons': inh_unique_neurons,
+            'inh_burst_idx': inh_burst_idx,
+            'inh_mean_burst': inh_mean_burst,
+        }
+
+    # Interpretation helper
+    def interpret_burst(burst_val, bin_ms, tau_ref):
+        # Max possible firings per bin given refractory period
+        max_possible = bin_ms / tau_ref
+        if burst_val < 1.1:
+            return "population sync"
+        elif burst_val < max_possible * 0.5:
+            return "mild bursting"
+        elif burst_val < max_possible * 0.8:
+            return "moderate bursting"
+        else:
+            return "max-rate bursting"
+
+    # Summary text
+    # Use 10ms bin as primary reference (spans ~2-3 cycles at gamma frequencies)
+    ref_bin = 10 if 10 in all_results else bin_sizes_ms[2]
+    ref_data = all_results[ref_bin]
+
+    summary_lines = [
+        "Burst Index = total_spikes / unique_neurons",
+        "  1.0 = each neuron fires once (population sync)",
+        "  >1.0 = neurons fire multiple times (bursting)",
+        "",
+        f"At {ref_bin}ms bins (reference):",
+        f"  E burst idx: {ref_data['exc_mean_burst']:.2f} - {interpret_burst(ref_data['exc_mean_burst'], ref_bin, 4.0)}",
+        f"  I burst idx: {ref_data['inh_mean_burst']:.2f} - {interpret_burst(ref_data['inh_mean_burst'], ref_bin, 2.5)}",
+        "",
+        f"E τ_ref=4ms → max {ref_bin/4:.1f} spikes/{ref_bin}ms",
+        f"I τ_ref=2.5ms → max {ref_bin/2.5:.1f} spikes/{ref_bin}ms",
+    ]
+    summary_text = '\n'.join(summary_lines)
+
+    fig.text(0.02, 0.01, summary_text, transform=fig.transFigure,
+             fontsize=8, color=text_color, verticalalignment='bottom',
+             family='monospace',
+             bbox=dict(boxstyle='round', facecolor=bg_color, edgecolor=spine_color, alpha=0.9))
+
+    plt.tight_layout(rect=[0, 0.12, 1, 1])  # Leave room for summary text
+
+    # Save the figure
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, bbox_inches='tight', facecolor=fig.get_facecolor())
+        print(f"Saved E/I synchrony analysis to {save_path}")
+
+    # Return comprehensive sync info
+    sync_info = {
+        'bin_sizes_ms': bin_sizes_ms,
+        'results_by_bin': all_results,
+        'reference_bin_ms': ref_bin,
+        'exc_mean_burst_ref': ref_data['exc_mean_burst'],
+        'inh_mean_burst_ref': ref_data['inh_mean_burst'],
+    }
+
+    return fig, sync_info
+
+
+def plot_network_activation_percentage(activity_record, n_neurons, dt=0.1, stim_times=None,
+                                        window_ms=5.0, save_path="network_activation.png",
+                                        figsize=(14, 6), darkstyle=True):
+    """
+    Plot the percentage of network activated over time.
+
+    Parameters:
+    -----------
+    activity_record : list of lists
+        Each element contains indices of neurons that spiked at that timestep
+    n_neurons : int
+        Total number of neurons in the network
+    dt : float
+        Timestep in ms
+    stim_times : list or None
+        List of stimulation time points (in ms) - draws vertical lines
+    window_ms : float
+        Sliding window size in ms for smoothing the activation curve
+    save_path : str or None
+        Path to save the figure. If None, figure is not saved.
+    figsize : tuple
+        Figure size
+    darkstyle : bool
+        If True, use dark background style
+
+    Returns:
+    --------
+    fig : matplotlib.figure.Figure
+        The figure object
+    activation_data : dict
+        Dictionary with time, raw percentage, and smoothed percentage arrays
+    """
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a2e'
+        text_color = '#eee'
+        spine_color = '#555'
+        line_color = '#ff6b6b'
+        smooth_color = '#4ecdc4'
+        stim_color = '#32ff32'
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        spine_color = '#333'
+        line_color = '#e74c3c'
+        smooth_color = '#16a085'
+        stim_color = 'green'
+
+    # Calculate activation percentage for each timestep
+    n_timesteps = len(activity_record)
+    time_ms = np.arange(n_timesteps) * dt
+
+    # Raw activation: number of neurons firing at each timestep / total neurons * 100
+    raw_activation = np.array([len(active) / n_neurons * 100 for active in activity_record])
+
+    # Smoothed activation using sliding window
+    window_steps = max(1, int(window_ms / dt))
+    smoothed_activation = np.convolve(raw_activation,
+                                       np.ones(window_steps) / window_steps,
+                                       mode='same')
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize, facecolor=bg_color)
+    ax.set_facecolor(bg_color)
+
+    # Plot raw activation (thin, semi-transparent)
+    ax.plot(time_ms, raw_activation, color=line_color, alpha=0.3, linewidth=0.5,
+            label='Instantaneous')
+
+    # Plot smoothed activation (thicker, more visible)
+    ax.plot(time_ms, smoothed_activation, color=smooth_color, linewidth=1.5,
+            label=f'Smoothed ({window_ms:.0f}ms window)')
+
+    # Mark stimulation times
+    if stim_times:
+        for stim_time in stim_times:
+            ax.axvline(x=stim_time, color=stim_color, linewidth=0.5, alpha=0.15)
+
+    # Labels and title
+    ax.set_xlabel('Time (ms)', color=text_color, fontsize=12)
+    ax.set_ylabel('Network Activation (%)', color=text_color, fontsize=12)
+    ax.set_title('Percentage of Network Activated Over Time', color=text_color, fontsize=14)
+
+    # Set y-axis limits with some padding
+    max_activation = max(np.max(raw_activation), np.max(smoothed_activation))
+    ax.set_ylim(0, min(100, max_activation * 1.1 + 1))
+    ax.set_xlim(0, time_ms[-1])
+
+    # Legend
+    ax.legend(loc='upper right', facecolor=bg_color, edgecolor=spine_color,
+              labelcolor=text_color)
+
+    # Style
+    ax.tick_params(colors=text_color)
+    for spine in ax.spines.values():
+        spine.set_color(spine_color)
+    ax.grid(True, alpha=0.2)
+
+    # Add statistics text
+    mean_activation = np.mean(raw_activation)
+    max_activation_val = np.max(raw_activation)
+    std_activation = np.std(raw_activation)
+
+    stats_text = (f"Mean: {mean_activation:.2f}%\n"
+                  f"Max: {max_activation_val:.2f}%\n"
+                  f"Std: {std_activation:.2f}%")
+
+    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+            fontsize=10, color=text_color, verticalalignment='top',
+            bbox=dict(boxstyle='round', facecolor=bg_color, edgecolor=spine_color, alpha=0.8))
+
+    plt.tight_layout()
+
+    # Save the figure
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor=fig.get_facecolor())
+        print(f"Saved network activation plot to {save_path}")
+
+    # Return data
+    activation_data = {
+        'time_ms': time_ms,
+        'raw_activation_pct': raw_activation,
+        'smoothed_activation_pct': smoothed_activation,
+        'mean_pct': mean_activation,
+        'max_pct': max_activation_val,
+        'std_pct': std_activation
+    }
+
+    return fig, activation_data

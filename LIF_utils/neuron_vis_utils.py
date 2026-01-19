@@ -107,7 +107,7 @@ def plot_reversal_effects(network, neuron_data, selected_neuron, stim_times=None
     if stim_times:
         for stim_time in stim_times:
             ax1.axvline(x=stim_time, color='green', linestyle='-.',
-                      linewidth=1.0, alpha=0.5)
+                      linewidth=0.8, alpha=0.15)
     
     ax1.set_ylabel("Membrane Potential (mV)", color=text_color)
     ax1.set_title("Membrane Potential and Reversal Potentials", color=text_color)

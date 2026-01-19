@@ -1,0 +1,98 @@
+{
+  "metadata": {
+    "timestamp": "2026-01-18T20:59:55.068966",
+    "description": "3D Spherical network experiment configuration"
+  },
+  "experiment_parameters": {
+    "n_neurons": 6000,
+    "connection_p": 0.1,
+    "connection_probabilities": {
+      "ee": 0.1,
+      "ei": 0.15,
+      "ie": 0.4,
+      "ii": 0.15
+    },
+    "weight_scale": 0.1,
+    "duration": 100,
+    "dt": 0.1,
+    "stim_interval": 50,
+    "stim_interval_strength": 10,
+    "stim_fraction": 0.2,
+    "transmission_delay": 1,
+    "inhibitory_fraction": 0.2,
+    "stochastic_stim": false,
+    "layout": "sphere",
+    "no_stimulation": false,
+    "enable_noise": true,
+    "v_noise_amp": 0.08,
+    "i_noise_amp": 0.003,
+    "e_reversal": 0.0,
+    "i_reversal": -80.0,
+    "random_seed": 42,
+    "distance_lambda": 0.13,
+    "lambda_decay_ie": 0.03,
+    "animate": true,
+    "max_animation_frames": 1000,
+    "current_injection_stimulation": false,
+    "current_injection_duration": 200,
+    "poisson_process_stimulation": true,
+    "poisson_process_probability": 0.01,
+    "poisson_process_duration": 3000
+  },
+  "network_parameters": {
+    "n_neurons": 6000,
+    "weight_scale": 0.1,
+    "distance_lambda": 0.13,
+    "lambda_decay_ie": 0.03,
+    "sphere_radius": 16.908774776802396,
+    "v_noise_amp": 0.08,
+    "i_noise_amp": 0.003,
+    "e_reversal": 0.0,
+    "i_reversal": -80.0,
+    "attempted_connections": 5683948,
+    "nonzero_connections": 3072982,
+    "connection_density": 0.08537484025115297
+  },
+  "neuron_parameters": {
+    "excitatory_neuron": {
+      "v_rest": -65.0,
+      "v_threshold": -55.0,
+      "v_reset": -75.0,
+      "tau_m": 10.0,
+      "tau_ref": 4.0,
+      "tau_e": 3.0,
+      "tau_i": 7.0,
+      "e_reversal": 0.0,
+      "i_reversal": -80.0,
+      "k_reversal": -90.0,
+      "v_noise_amp": 0.08,
+      "i_noise_amp": 0.003,
+      "adaptation_increment": 0.2,
+      "tau_adaptation": 100.0,
+      "is_inhibitory": false
+    },
+    "inhibitory_neuron": {
+      "v_rest": -65.0,
+      "v_threshold": -55.0,
+      "v_reset": -75.0,
+      "tau_m": 10.0,
+      "tau_ref": 2.5,
+      "tau_e": 3.0,
+      "tau_i": 7.0,
+      "e_reversal": 0.0,
+      "i_reversal": -80.0,
+      "k_reversal": -90.0,
+      "v_noise_amp": 0.08,
+      "i_noise_amp": 0.003,
+      "adaptation_increment": 0.2,
+      "tau_adaptation": 100.0,
+      "is_inhibitory": true
+    }
+  },
+  "network_composition": {
+    "total_neurons": 6000,
+    "excitatory_neurons": 4802,
+    "inhibitory_neurons": 1198,
+    "inhibitory_fraction_actual": 0.19966666666666666
+  }
+}

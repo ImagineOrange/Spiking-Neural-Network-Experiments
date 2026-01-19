@@ -57,6 +57,13 @@ def run_unified_simulation(network, duration=1000.0, dt=0.1, stim_interval=None,
     ongoing_current_injection = {}  # For current injection mode
     ongoing_poisson_window = {}     # For Poisson mode: {neuron_idx: steps_remaining}
 
+    # --- Pre-select fixed "input layer" neurons for interval-based stimulation ---
+    # These neurons will be the ONLY ones to receive stimulation throughout the simulation
+    fixed_stim_neurons = None
+    if not stochastic_stim and stim_interval and not no_stimulation:
+        fixed_stim_neurons = np.random.choice(network.n_neurons, size=int(network.n_neurons*stim_fraction), replace=False)
+        print(f"Selected {len(fixed_stim_neurons)} fixed input neurons ({stim_fraction*100:.1f}% of network)")
+
     # --- Original stochastic stim initialization (legacy) ---
     if stochastic_stim and not no_stimulation:
         initial_stim_neurons = np.random.choice(network.n_neurons, size=5, replace=False)
@@ -79,14 +86,13 @@ def run_unified_simulation(network, duration=1000.0, dt=0.1, stim_interval=None,
                 for idx in stim_neurons:
                     network.stimulate_neuron(idx, current=current_strength)
 
-            # --- Interval-based stimulation: add NEW neurons to ongoing tracking ---
+            # --- Interval-based stimulation: use fixed input neurons and start injection window ---
             if not stochastic_stim and stim_interval and step % int(stim_interval / dt) == 0 and step != 0:
-                stim_neurons = np.random.choice(network.n_neurons, size=int(network.n_neurons*stim_fraction), replace=False)
-                stimulation_record['times'].append(time)
-                stimulation_record['neurons'].append(list(stim_neurons))
+                # Use the pre-selected fixed input neurons (same neurons throughout simulation)
+                stim_neurons = fixed_stim_neurons
 
                 if current_injection_stimulation:
-                    # Current Injection Mode: add to tracking dict
+                    # Current Injection Mode: add to tracking dict (these neurons get sustained current)
                     for idx in stim_neurons:
                         ongoing_current_injection[idx] = current_injection_duration
 
@@ -98,29 +104,41 @@ def run_unified_simulation(network, duration=1000.0, dt=0.1, stim_interval=None,
             # --- Process ongoing current injection stimulations ---
             if current_injection_stimulation and ongoing_current_injection:
                 neurons_to_remove = []
+                stimulated_this_step = []
                 for idx in list(ongoing_current_injection.keys()):
                     steps_remaining = ongoing_current_injection[idx]
                     if steps_remaining > 0:
-                        # Apply current this timestep
+                        # Apply current this timestep to the SAME neurons
                         network.stimulate_neuron(idx, current=stim_interval_strength)
+                        stimulated_this_step.append(idx)
                         ongoing_current_injection[idx] = steps_remaining - 1
                     if ongoing_current_injection[idx] <= 0:
                         neurons_to_remove.append(idx)
+                # Record stimulations
+                if stimulated_this_step:
+                    stimulation_record['times'].append(time)
+                    stimulation_record['neurons'].append(stimulated_this_step)
                 for idx in neurons_to_remove:
                     del ongoing_current_injection[idx]
 
             # --- Process ongoing Poisson windows ---
             if poisson_process_stimulation and not current_injection_stimulation and ongoing_poisson_window:
                 neurons_to_remove = []
+                stimulated_this_step = []
                 for idx in list(ongoing_poisson_window.keys()):
                     steps_remaining = ongoing_poisson_window[idx]
                     if steps_remaining > 0:
                         # Each timestep has probability of triggering stimulation
                         if np.random.random() < poisson_process_probability:
                             network.stimulate_neuron(idx, current=stim_interval_strength)
+                            stimulated_this_step.append(idx)
                         ongoing_poisson_window[idx] = steps_remaining - 1
                     if ongoing_poisson_window[idx] <= 0:
                         neurons_to_remove.append(idx)
+                # Record stimulations
+                if stimulated_this_step:
+                    stimulation_record['times'].append(time)
+                    stimulation_record['neurons'].append(stimulated_this_step)
                 for idx in neurons_to_remove:
                     del ongoing_poisson_window[idx]
 

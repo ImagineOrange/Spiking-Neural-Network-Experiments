@@ -5,6 +5,12 @@ import random
 import matplotlib.animation as animation # Ensure animation is imported
 from tqdm import tqdm
 
+try:
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+
 # Default: do NOT set dark style globally - let functions handle it based on darkstyle parameter
 
 def plot_network_connections_sparse(network, stimulated_neurons=None, connected_neurons=None,
@@ -1203,4 +1209,630 @@ def visualize_rich_club_distribution(network, save_path="rich_club_analysis.png"
 
     plt.close(fig)
     return results
+
+
+def visualize_distance_weights_3d(network, neuron_idx, save_path=None):
+    """
+    Creates an interactive 3D visualization showing how connection weights decay with distance
+    for a spherical neural network. Shows outgoing connections from a specific neuron with
+    lines colored by weight strength.
+
+    Parameters:
+    -----------
+    network : SphericalNeuronalNetwork
+        The 3D spherical neural network object with neuron_3d_positions attribute
+    neuron_idx : int
+        Index of the neuron to highlight (source neuron)
+    save_path : str or None
+        Path to save the HTML visualization. If None, uses default name.
+
+    Returns:
+    --------
+    fig : plotly.graph_objects.Figure
+        The Plotly figure object
+    """
+    if not PLOTLY_AVAILABLE:
+        print("Error: Plotly is required for 3D visualization. Install with: pip install plotly")
+        return None
+
+    if not hasattr(network, 'neuron_3d_positions'):
+        print("Error: This visualization requires a 3D network with neuron_3d_positions attribute.")
+        return None
+
+    print(f"\nCreating 3D distance-weight visualization for neuron {neuron_idx}...")
+
+    # Get the source neuron's position
+    center_pos = network.neuron_3d_positions[neuron_idx]
+    sphere_radius = network.sphere_radius
+
+    # Collect outgoing connections with distances and weights
+    outgoing_data = []
+    for j in range(network.n_neurons):
+        if j != neuron_idx and network.weights[neuron_idx, j] != 0:
+            target_pos = network.neuron_3d_positions[j]
+            dist = np.sqrt(
+                (center_pos[0] - target_pos[0])**2 +
+                (center_pos[1] - target_pos[1])**2 +
+                (center_pos[2] - target_pos[2])**2
+            )
+            weight = network.weights[neuron_idx, j]
+            is_target_inhibitory = network.neurons[j].is_inhibitory
+            outgoing_data.append((j, target_pos, dist, weight, is_target_inhibitory))
+
+    n_connections = len(outgoing_data)
+    print(f"Found {n_connections} outgoing connections from neuron {neuron_idx}")
+
+    # Sort by absolute weight (weakest first for drawing order)
+    outgoing_data_sorted = sorted(outgoing_data, key=lambda x: abs(x[3]))
+
+    # Extract all neuron positions for background scatter
+    all_x = [network.neuron_3d_positions[i][0] for i in range(network.n_neurons)]
+    all_y = [network.neuron_3d_positions[i][1] for i in range(network.n_neurons)]
+    all_z = [network.neuron_3d_positions[i][2] for i in range(network.n_neurons)]
+
+    # Determine neuron types for coloring
+    is_inhibitory = [network.neurons[i].is_inhibitory for i in range(network.n_neurons)]
+
+    # Create figure
+    fig = go.Figure()
+
+    # --- Add translucent sphere outline ---
+    u = np.linspace(0, 2 * np.pi, 40)
+    v = np.linspace(0, np.pi, 20)
+    sphere_x = sphere_radius * np.outer(np.cos(u), np.sin(v))
+    sphere_y = sphere_radius * np.outer(np.sin(u), np.sin(v))
+    sphere_z = sphere_radius * np.outer(np.ones(np.size(u)), np.cos(v))
+
+    fig.add_trace(go.Surface(
+        x=sphere_x, y=sphere_y, z=sphere_z,
+        opacity=0.05,
+        colorscale=[[0, 'rgba(100,100,100,0.1)'], [1, 'rgba(100,100,100,0.1)']],
+        showscale=False,
+        hoverinfo='skip',
+        name='Sphere boundary'
+    ))
+
+    # --- Add all neurons as small background points ---
+    # Non-connected neurons (gray, very small)
+    connected_indices = set([d[0] for d in outgoing_data])
+    non_connected_x = [all_x[i] for i in range(network.n_neurons)
+                       if i != neuron_idx and i not in connected_indices]
+    non_connected_y = [all_y[i] for i in range(network.n_neurons)
+                       if i != neuron_idx and i not in connected_indices]
+    non_connected_z = [all_z[i] for i in range(network.n_neurons)
+                       if i != neuron_idx and i not in connected_indices]
+
+    fig.add_trace(go.Scatter3d(
+        x=non_connected_x, y=non_connected_y, z=non_connected_z,
+        mode='markers',
+        marker=dict(size=1.5, color='rgba(150,150,150,0.3)'),
+        hoverinfo='skip',
+        name='Other neurons'
+    ))
+
+    # --- Add connection lines ---
+    # Get weight range for color mapping
+    if outgoing_data_sorted:
+        abs_weights = [abs(d[3]) for d in outgoing_data_sorted]
+        min_weight = min(abs_weights)
+        max_weight = max(abs_weights)
+        weight_range = max_weight - min_weight if max_weight > min_weight else 1.0
+
+        # Create connection lines with color based on weight strength
+        for idx, (target_idx, target_pos, dist, weight, is_target_inhib) in enumerate(outgoing_data_sorted):
+            # Normalize weight for color mapping (0 to 1)
+            norm_weight = (abs(weight) - min_weight) / weight_range if weight_range > 0 else 0.5
+
+            # Color: use plasma-like gradient (purple -> yellow)
+            # Low weight = purple (128, 0, 128), High weight = yellow (255, 255, 0)
+            r = int(128 + 127 * norm_weight)
+            g = int(0 + 255 * norm_weight)
+            b = int(128 - 128 * norm_weight)
+            line_color = f'rgba({r},{g},{b},0.7)'
+
+            # Line width based on weight
+            line_width = 1 + 4 * norm_weight
+
+            # Create line from source to target
+            fig.add_trace(go.Scatter3d(
+                x=[center_pos[0], target_pos[0]],
+                y=[center_pos[1], target_pos[1]],
+                z=[center_pos[2], target_pos[2]],
+                mode='lines',
+                line=dict(color=line_color, width=line_width),
+                hoverinfo='text',
+                hovertext=f'Target: {target_idx}<br>Distance: {dist:.2f}<br>Weight: {weight:.4f}',
+                showlegend=False
+            ))
+
+    # --- Add connected neurons (target neurons) ---
+    exc_targets = [(d[1], d[0], d[2], d[3]) for d in outgoing_data if not d[4]]  # Excitatory targets
+    inh_targets = [(d[1], d[0], d[2], d[3]) for d in outgoing_data if d[4]]  # Inhibitory targets
+
+    if exc_targets:
+        fig.add_trace(go.Scatter3d(
+            x=[t[0][0] for t in exc_targets],
+            y=[t[0][1] for t in exc_targets],
+            z=[t[0][2] for t in exc_targets],
+            mode='markers',
+            marker=dict(size=4, color='#ff6b6b', opacity=0.8),
+            hoverinfo='text',
+            hovertext=[f'Neuron {t[1]} (Exc)<br>Dist: {t[2]:.2f}<br>W: {t[3]:.4f}' for t in exc_targets],
+            name='Excitatory targets'
+        ))
+
+    if inh_targets:
+        fig.add_trace(go.Scatter3d(
+            x=[t[0][0] for t in inh_targets],
+            y=[t[0][1] for t in inh_targets],
+            z=[t[0][2] for t in inh_targets],
+            mode='markers',
+            marker=dict(size=4, color='#5454ff', opacity=0.8, symbol='diamond'),
+            hoverinfo='text',
+            hovertext=[f'Neuron {t[1]} (Inh)<br>Dist: {t[2]:.2f}<br>W: {t[3]:.4f}' for t in inh_targets],
+            name='Inhibitory targets'
+        ))
+
+    # --- Add source neuron (large, green) ---
+    source_color = '#1dd1a1'
+    fig.add_trace(go.Scatter3d(
+        x=[center_pos[0]],
+        y=[center_pos[1]],
+        z=[center_pos[2]],
+        mode='markers',
+        marker=dict(size=12, color=source_color, line=dict(width=2, color='white')),
+        hoverinfo='text',
+        hovertext=f'Source Neuron {neuron_idx}<br>Pos: ({center_pos[0]:.2f}, {center_pos[1]:.2f}, {center_pos[2]:.2f})',
+        name=f'Source neuron {neuron_idx}'
+    ))
+
+    # --- Layout ---
+    fig.update_layout(
+        title=dict(
+            text=f'Neuron {neuron_idx} - {n_connections} Outgoing Connections<br>'
+                 f'<sub>Line color: weight strength (purple=weak, yellow=strong) | Drag to rotate, scroll to zoom</sub>',
+            x=0.5,
+            font=dict(size=16, color='white')
+        ),
+        scene=dict(
+            xaxis=dict(
+                title='X',
+                backgroundcolor='rgb(20, 20, 20)',
+                gridcolor='rgb(50, 50, 50)',
+                showbackground=True,
+                zerolinecolor='rgb(80, 80, 80)',
+                tickfont=dict(color='white'),
+                titlefont=dict(color='white')
+            ),
+            yaxis=dict(
+                title='Y',
+                backgroundcolor='rgb(20, 20, 20)',
+                gridcolor='rgb(50, 50, 50)',
+                showbackground=True,
+                zerolinecolor='rgb(80, 80, 80)',
+                tickfont=dict(color='white'),
+                titlefont=dict(color='white')
+            ),
+            zaxis=dict(
+                title='Z',
+                backgroundcolor='rgb(20, 20, 20)',
+                gridcolor='rgb(50, 50, 50)',
+                showbackground=True,
+                zerolinecolor='rgb(80, 80, 80)',
+                tickfont=dict(color='white'),
+                titlefont=dict(color='white')
+            ),
+            aspectmode='data',
+            camera=dict(
+                eye=dict(x=1.5, y=1.5, z=1.0)
+            ),
+            dragmode='orbit'  # Explicitly enable orbit rotation
+        ),
+        paper_bgcolor='rgb(10, 10, 10)',
+        legend=dict(
+            x=0.02,
+            y=0.98,
+            bgcolor='rgba(30,30,30,0.8)',
+            font=dict(color='white')
+        ),
+        margin=dict(l=0, r=0, t=60, b=0)
+    )
+
+    # Save to HTML with scroll zoom enabled
+    if save_path is None:
+        save_path = f"distance_weights_neuron{neuron_idx}_3d.html"
+
+    fig.write_html(save_path, config={'scrollZoom': True})
+    print(f"Saved 3D distance-weight visualization to {save_path}")
+
+    # Also create a weight vs distance scatter plot (2D, saved as PNG)
+    scatter_save_path = save_path.replace('.html', '_scatter.png')
+    _create_weight_distance_scatter(outgoing_data, network, neuron_idx, scatter_save_path)
+
+    return fig
+
+
+def visualize_ie_distance_weights_3d(network, neuron_idx=None, save_path=None):
+    """
+    Creates an interactive 3D visualization showing how I→E (inhibitory to excitatory)
+    connection weights decay with distance. If neuron_idx is provided, shows only
+    connections from that specific inhibitory neuron. Otherwise shows all I→E connections.
+
+    Parameters:
+    -----------
+    network : SphericalNeuronalNetwork
+        The 3D spherical neural network object with neuron_3d_positions attribute
+    neuron_idx : int or None
+        Index of a specific inhibitory neuron to visualize. If None, shows all I→E connections.
+    save_path : str or None
+        Path to save the HTML visualization. If None, uses default name.
+
+    Returns:
+    --------
+    fig : plotly.graph_objects.Figure
+        The Plotly figure object
+    """
+    if not PLOTLY_AVAILABLE:
+        print("Error: Plotly is required for 3D visualization. Install with: pip install plotly")
+        return None
+
+    if not hasattr(network, 'neuron_3d_positions'):
+        print("Error: This visualization requires a 3D network with neuron_3d_positions attribute.")
+        return None
+
+    # If neuron_idx provided, validate it's an inhibitory neuron
+    if neuron_idx is not None:
+        if not network.neurons[neuron_idx].is_inhibitory:
+            print(f"Warning: Neuron {neuron_idx} is not inhibitory. Finding a nearby inhibitory neuron...")
+            # Find the first inhibitory neuron
+            for i in range(network.n_neurons):
+                if network.neurons[i].is_inhibitory:
+                    neuron_idx = i
+                    break
+        print(f"\nCreating 3D I→E distance-weight visualization for inhibitory neuron {neuron_idx}...")
+    else:
+        print(f"\nCreating 3D I→E distance-weight visualization (all connections)...")
+
+    sphere_radius = network.sphere_radius
+
+    # Collect I→E connections with distances and weights
+    ie_connections = []
+    neurons_to_check = [neuron_idx] if neuron_idx is not None else range(network.n_neurons)
+
+    for i in neurons_to_check:
+        if not network.neurons[i].is_inhibitory:
+            continue  # Skip if source is not inhibitory
+        for j in range(network.n_neurons):
+            if network.neurons[j].is_inhibitory:
+                continue  # Skip if target is inhibitory (we want I→E only)
+            if network.weights[i, j] != 0:
+                source_pos = network.neuron_3d_positions[i]
+                target_pos = network.neuron_3d_positions[j]
+                dist = np.sqrt(
+                    (source_pos[0] - target_pos[0])**2 +
+                    (source_pos[1] - target_pos[1])**2 +
+                    (source_pos[2] - target_pos[2])**2
+                )
+                weight = network.weights[i, j]
+                ie_connections.append((i, j, source_pos, target_pos, dist, weight))
+
+    n_connections = len(ie_connections)
+    if neuron_idx is not None:
+        print(f"Found {n_connections} I→E connections from neuron {neuron_idx}")
+    else:
+        print(f"Found {n_connections} I→E connections in the network")
+
+    if n_connections == 0:
+        print("No I→E connections found.")
+        return None
+
+    # Sort by absolute weight (weakest first for drawing order)
+    ie_connections_sorted = sorted(ie_connections, key=lambda x: abs(x[5]))
+
+    # Sample connections if too many (for performance)
+    max_connections_to_show = 5000
+    if n_connections > max_connections_to_show:
+        # Sample evenly across weight distribution
+        step = n_connections // max_connections_to_show
+        ie_connections_sampled = ie_connections_sorted[::step]
+        print(f"Sampled {len(ie_connections_sampled)} connections for visualization (from {n_connections})")
+    else:
+        ie_connections_sampled = ie_connections_sorted
+
+    # Extract all neuron positions for background scatter
+    all_x = [network.neuron_3d_positions[i][0] for i in range(network.n_neurons)]
+    all_y = [network.neuron_3d_positions[i][1] for i in range(network.n_neurons)]
+    all_z = [network.neuron_3d_positions[i][2] for i in range(network.n_neurons)]
+
+    # Create figure
+    fig = go.Figure()
+
+    # --- Add translucent sphere outline ---
+    u = np.linspace(0, 2 * np.pi, 40)
+    v = np.linspace(0, np.pi, 20)
+    sphere_x = sphere_radius * np.outer(np.cos(u), np.sin(v))
+    sphere_y = sphere_radius * np.outer(np.sin(u), np.sin(v))
+    sphere_z = sphere_radius * np.outer(np.ones(np.size(u)), np.cos(v))
+
+    fig.add_trace(go.Surface(
+        x=sphere_x, y=sphere_y, z=sphere_z,
+        opacity=0.05,
+        colorscale=[[0, 'rgba(100,100,100,0.1)'], [1, 'rgba(100,100,100,0.1)']],
+        showscale=False,
+        hoverinfo='skip',
+        name='Sphere boundary'
+    ))
+
+    # --- Add inhibitory neurons (blue) ---
+    inh_x = [all_x[i] for i in range(network.n_neurons) if network.neurons[i].is_inhibitory]
+    inh_y = [all_y[i] for i in range(network.n_neurons) if network.neurons[i].is_inhibitory]
+    inh_z = [all_z[i] for i in range(network.n_neurons) if network.neurons[i].is_inhibitory]
+
+    fig.add_trace(go.Scatter3d(
+        x=inh_x, y=inh_y, z=inh_z,
+        mode='markers',
+        marker=dict(size=3, color='#5454ff', opacity=0.6),
+        hoverinfo='skip',
+        name='Inhibitory neurons'
+    ))
+
+    # --- Add excitatory neurons (red, smaller) ---
+    exc_x = [all_x[i] for i in range(network.n_neurons) if not network.neurons[i].is_inhibitory]
+    exc_y = [all_y[i] for i in range(network.n_neurons) if not network.neurons[i].is_inhibitory]
+    exc_z = [all_z[i] for i in range(network.n_neurons) if not network.neurons[i].is_inhibitory]
+
+    fig.add_trace(go.Scatter3d(
+        x=exc_x, y=exc_y, z=exc_z,
+        mode='markers',
+        marker=dict(size=2, color='rgba(255,100,100,0.3)'),
+        hoverinfo='skip',
+        name='Excitatory neurons'
+    ))
+
+    # --- Add I→E connection lines ---
+    if ie_connections_sampled:
+        abs_weights = [abs(d[5]) for d in ie_connections_sampled]
+        min_weight = min(abs_weights)
+        max_weight = max(abs_weights)
+        weight_range = max_weight - min_weight if max_weight > min_weight else 1.0
+
+        # Create connection lines with color based on weight strength
+        for (src_idx, tgt_idx, src_pos, tgt_pos, dist, weight) in ie_connections_sampled:
+            # Normalize weight for color mapping (0 to 1)
+            norm_weight = (abs(weight) - min_weight) / weight_range if weight_range > 0 else 0.5
+
+            # Color: use plasma-like gradient (purple -> yellow)
+            r = int(128 + 127 * norm_weight)
+            g = int(0 + 255 * norm_weight)
+            b = int(128 - 128 * norm_weight)
+            line_color = f'rgba({r},{g},{b},0.5)'
+
+            # Line width based on weight
+            line_width = 0.5 + 2 * norm_weight
+
+            # Create line from source to target
+            fig.add_trace(go.Scatter3d(
+                x=[src_pos[0], tgt_pos[0]],
+                y=[src_pos[1], tgt_pos[1]],
+                z=[src_pos[2], tgt_pos[2]],
+                mode='lines',
+                line=dict(color=line_color, width=line_width),
+                hoverinfo='text',
+                hovertext=f'I({src_idx})→E({tgt_idx})<br>Distance: {dist:.2f}<br>Weight: {weight:.4f}',
+                showlegend=False
+            ))
+
+    # --- Layout ---
+    lambda_ie = getattr(network, 'lambda_decay_ie', 0.05)
+    if neuron_idx is not None:
+        title_text = f'I→E Connections from Neuron {neuron_idx} - {n_connections} connections (λ_ie={lambda_ie})<br>'
+    else:
+        title_text = f'I→E Connections - {n_connections} total (λ_ie={lambda_ie})<br>'
+    fig.update_layout(
+        title=dict(
+            text=title_text + f'<sub>Line color: weight strength (purple=weak, yellow=strong) | Drag to rotate, scroll to zoom</sub>',
+            x=0.5,
+            font=dict(size=16, color='white')
+        ),
+        scene=dict(
+            xaxis=dict(
+                title='X',
+                backgroundcolor='rgb(20, 20, 20)',
+                gridcolor='rgb(50, 50, 50)',
+                showbackground=True,
+                zerolinecolor='rgb(80, 80, 80)',
+                tickfont=dict(color='white'),
+                titlefont=dict(color='white')
+            ),
+            yaxis=dict(
+                title='Y',
+                backgroundcolor='rgb(20, 20, 20)',
+                gridcolor='rgb(50, 50, 50)',
+                showbackground=True,
+                zerolinecolor='rgb(80, 80, 80)',
+                tickfont=dict(color='white'),
+                titlefont=dict(color='white')
+            ),
+            zaxis=dict(
+                title='Z',
+                backgroundcolor='rgb(20, 20, 20)',
+                gridcolor='rgb(50, 50, 50)',
+                showbackground=True,
+                zerolinecolor='rgb(80, 80, 80)',
+                tickfont=dict(color='white'),
+                titlefont=dict(color='white')
+            ),
+            aspectmode='data',
+            camera=dict(
+                eye=dict(x=1.5, y=1.5, z=1.0)
+            ),
+            dragmode='orbit'
+        ),
+        paper_bgcolor='rgb(10, 10, 10)',
+        legend=dict(
+            x=0.02,
+            y=0.98,
+            bgcolor='rgba(30,30,30,0.8)',
+            font=dict(color='white')
+        ),
+        margin=dict(l=0, r=0, t=60, b=0)
+    )
+
+    # Save to HTML with scroll zoom enabled
+    if save_path is None:
+        save_path = "ie_distance_weights_3d.html"
+
+    fig.write_html(save_path, config={'scrollZoom': True})
+    print(f"Saved 3D I→E distance-weight visualization to {save_path}")
+
+    # Also create a weight vs distance scatter plot (2D, saved as PNG)
+    scatter_save_path = save_path.replace('.html', '_scatter.png')
+    _create_ie_weight_distance_scatter(ie_connections, network, scatter_save_path)
+
+    return fig
+
+
+def _create_ie_weight_distance_scatter(ie_connections, network, save_path):
+    """
+    Helper function to create a 2D scatter plot of I→E weight vs distance.
+
+    Parameters:
+    -----------
+    ie_connections : list
+        List of tuples (src_idx, tgt_idx, src_pos, tgt_pos, distance, weight)
+    network : SphericalNeuronalNetwork
+        The network object
+    save_path : str
+        Path to save the scatter plot
+    """
+    if not ie_connections:
+        print("No I→E connections to plot.")
+        return
+
+    # Extract data
+    distances = [d[4] for d in ie_connections]
+    weights = [d[5] for d in ie_connections]
+
+    # Create figure with dark style
+    fig, ax = plt.subplots(figsize=(10, 7), facecolor='#1a1a1a')
+    ax.set_facecolor('#0a0a0a')
+
+    # Scatter plot - all I→E weights are negative (inhibitory)
+    ax.scatter(distances, weights, color='#00ccff', alpha=0.5, s=20, label='I→E connections',
+               edgecolors='white', linewidths=0.2)
+
+    # Plot theoretical decay curve for I→E
+    max_dist = max(distances) * 1.05 if distances else 10
+    dist_range = np.linspace(0, max_dist, 100)
+    lambda_decay_ie = getattr(network, 'lambda_decay_ie', 0.05)
+    distance_lambda = getattr(network, 'distance_lambda', 0.2)
+
+    # I→E reference (negative weights, 4x stronger, using lambda_decay_ie)
+    ref_ie = -network.weight_scale * 4.0 * np.exp(-lambda_decay_ie * dist_range)
+    ax.plot(dist_range, ref_ie, '--', color='#00ff00', alpha=0.9, linewidth=2.5,
+            label=f'I→E decay (λ={lambda_decay_ie})')
+
+    # Also show what the standard inhibitory decay would look like for comparison
+    ref_standard = -network.weight_scale * 4.0 * np.exp(-distance_lambda * dist_range)
+    ax.plot(dist_range, ref_standard, ':', color='#ff4444', alpha=0.7, linewidth=2,
+            label=f'Standard inh. decay (λ={distance_lambda})')
+
+    # Zero line
+    ax.axhline(y=0, color='white', linestyle='-', linewidth=0.5, alpha=0.5)
+
+    # Styling
+    ax.set_xlabel('3D Euclidean Distance', color='white', fontsize=12)
+    ax.set_ylabel('Synaptic Weight', color='white', fontsize=12)
+    ax.set_title(f'I→E Weight vs Distance\n'
+                 f'({len(ie_connections)} connections, λ_ie={lambda_decay_ie})',
+                 color='white', fontsize=14)
+
+    ax.tick_params(colors='white', labelsize=10)
+    ax.grid(True, alpha=0.2, color='gray')
+    ax.legend(loc='lower right', framealpha=0.7, fontsize=10)
+
+    # Style spines
+    for spine in ax.spines.values():
+        spine.set_color('white')
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, facecolor='#1a1a1a', bbox_inches='tight')
+    plt.close(fig)
+    print(f"Saved I→E weight-distance scatter plot to {save_path}")
+
+
+def _create_weight_distance_scatter(outgoing_data, network, neuron_idx, save_path):
+    """
+    Helper function to create a 2D scatter plot of weight vs distance.
+
+    Parameters:
+    -----------
+    outgoing_data : list
+        List of tuples (target_idx, target_pos, distance, weight, is_inhibitory)
+    network : SphericalNeuronalNetwork
+        The network object
+    neuron_idx : int
+        Index of the source neuron
+    save_path : str
+        Path to save the scatter plot
+    """
+    if not outgoing_data:
+        print("No outgoing connections to plot.")
+        return
+
+    # Extract data
+    distances = [d[2] for d in outgoing_data]
+    weights = [d[3] for d in outgoing_data]
+
+    # Create figure with dark style
+    fig, ax = plt.subplots(figsize=(10, 7), facecolor='#1a1a1a')
+    ax.set_facecolor('#0a0a0a')
+
+    # Scatter plot - color by sign of weight
+    exc_mask = [w > 0 for w in weights]
+    inh_mask = [w < 0 for w in weights]
+
+    exc_dist = [distances[i] for i in range(len(distances)) if exc_mask[i]]
+    exc_weight = [weights[i] for i in range(len(weights)) if exc_mask[i]]
+    inh_dist = [distances[i] for i in range(len(distances)) if inh_mask[i]]
+    inh_weight = [weights[i] for i in range(len(weights)) if inh_mask[i]]
+
+    ax.scatter(exc_dist, exc_weight, color='#ffcc00', alpha=0.7, s=40, label='Excitatory', edgecolors='white', linewidths=0.3)
+    ax.scatter(inh_dist, inh_weight, color='#00ccff', alpha=0.7, s=40, label='Inhibitory', edgecolors='white', linewidths=0.3)
+
+    # Plot theoretical decay curves
+    max_dist = max(distances) * 1.05 if distances else 10
+    dist_range = np.linspace(0, max_dist, 100)
+    distance_lambda = getattr(network, 'distance_lambda', 0.2)
+
+    # Excitatory reference (positive weights)
+    ref_exc = network.weight_scale * np.exp(-distance_lambda * dist_range)
+    ax.plot(dist_range, ref_exc, '--', color='#00ff00', alpha=0.7, linewidth=2, label='Exc. decay curve')
+
+    # Inhibitory reference (negative weights, 4x stronger)
+    ref_inh = -network.weight_scale * 4.0 * np.exp(-distance_lambda * dist_range)
+    ax.plot(dist_range, ref_inh, '--', color='#ff4444', alpha=0.7, linewidth=2, label='Inh. decay curve')
+
+    # Zero line
+    ax.axhline(y=0, color='white', linestyle='-', linewidth=0.5, alpha=0.5)
+
+    # Styling
+    ax.set_xlabel('3D Euclidean Distance', color='white', fontsize=12)
+    ax.set_ylabel('Synaptic Weight', color='white', fontsize=12)
+    ax.set_title(f'Weight vs Distance - Neuron {neuron_idx}\n'
+                 f'({len(outgoing_data)} connections, λ={distance_lambda})',
+                 color='white', fontsize=14)
+
+    ax.tick_params(colors='white', labelsize=10)
+    ax.grid(True, alpha=0.2, color='gray')
+    ax.legend(loc='upper right', framealpha=0.7, fontsize=10)
+
+    # Style spines
+    for spine in ax.spines.values():
+        spine.set_color('white')
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, facecolor='#1a1a1a', bbox_inches='tight')
+    plt.close(fig)
+    print(f"Saved weight-distance scatter plot to {save_path}")
 
