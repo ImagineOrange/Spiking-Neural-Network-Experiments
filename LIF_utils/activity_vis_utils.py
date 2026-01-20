@@ -1,9 +1,13 @@
+import warnings
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.gridspec import GridSpec # Needed for combined plot
 from matplotlib.patches import Circle
 from tqdm import tqdm
+
+# Suppress tight_layout warnings (common with GridSpec)
+warnings.filterwarnings('ignore', message='.*tight_layout.*')
 
 # Default: do NOT set dark style globally - let functions handle it based on darkstyle parameter
 
@@ -349,7 +353,7 @@ def plot_network_activity_with_stimuli(network, activity_record, stim_times=None
     return fig
 
 
-def plot_psth_and_raster(activity_record, stim_times=None, bin_size=10, dt=0.1,
+def plot_psth_and_raster(activity_record, stim_times=None, stim_duration_ms=None, bin_size=10, dt=0.1,
                           neuron_subset=None, figsize=(14, 8), dpi=150,
                           save_path="psth_raster_plot.png", darkstyle=True):
     """
@@ -361,6 +365,9 @@ def plot_psth_and_raster(activity_record, stim_times=None, bin_size=10, dt=0.1,
         List of lists containing active neuron indices at each time step
     stim_times : list or None
         List of stimulation time points (in ms)
+    stim_duration_ms : float or None
+        Duration of each stimulation period in ms. If provided, draws shaded blocks
+        instead of vertical lines.
     bin_size : int
         Size of bins for PSTH in time steps
     dt : float
@@ -454,12 +461,20 @@ def plot_psth_and_raster(activity_record, stim_times=None, bin_size=10, dt=0.1,
     ax_raster.set_xlabel('Time (ms)', color=text_color, fontsize=12)
     ax_raster.set_ylabel('Neuron ID', color=text_color, fontsize=12)
     
-    # Mark stimulation times if provided (green vertical lines)
+    # Mark stimulation times if provided
     if stim_times:
+        stim_color = '#32ff32'
         for stim_time in stim_times:
-            # Draw vertical lines across both plots
-            ax_psth.axvline(x=stim_time, color='#32ff32', linewidth=0.8, alpha=0.15)
-            ax_raster.axvline(x=stim_time, color='#32ff32', linewidth=0.8, alpha=0.15)
+            if stim_duration_ms and stim_duration_ms > 0:
+                # Draw shaded blocks showing stimulation duration
+                ax_psth.axvspan(stim_time, stim_time + stim_duration_ms,
+                               color=stim_color, alpha=0.15, linewidth=0)
+                ax_raster.axvspan(stim_time, stim_time + stim_duration_ms,
+                                 color=stim_color, alpha=0.15, linewidth=0)
+            else:
+                # Draw vertical lines across both plots
+                ax_psth.axvline(x=stim_time, color=stim_color, linewidth=0.8, alpha=0.15)
+                ax_raster.axvline(x=stim_time, color=stim_color, linewidth=0.8, alpha=0.15)
     
     # Style the plots based on darkstyle
     for ax in [ax_psth, ax_raster]:
@@ -872,7 +887,7 @@ def Layered_visualize_distance_dependences(network, pos, neuron_idx, base_transm
 def plot_ei_psth_and_raster(network, activity_record, bin_size=10, dt=0.1,
                              figsize=(14, 10), dpi=150,
                              save_path="ei_psth_raster_plot.png", darkstyle=False,
-                             stim_times=None):
+                             stim_times=None, stim_duration_ms=None):
     """
     Create separate PSTH and raster plots for excitatory and inhibitory neurons.
     Excitatory neurons are shown in red, inhibitory in blue.
@@ -896,7 +911,10 @@ def plot_ei_psth_and_raster(network, activity_record, bin_size=10, dt=0.1,
     darkstyle : bool
         If True, use dark background style. If False, use white background
     stim_times : list or None
-        List of stimulation time points (in ms) - draws green vertical lines
+        List of stimulation time points (in ms) - draws green vertical lines or blocks
+    stim_duration_ms : float or None
+        Duration of each stimulation period in ms. If provided, draws shaded blocks
+        instead of vertical lines.
 
     Returns:
     --------
@@ -920,13 +938,25 @@ def plot_ei_psth_and_raster(network, activity_record, bin_size=10, dt=0.1,
     inh_color = '#3498db'  # Blue for inhibitory
 
     # Identify excitatory and inhibitory neurons
+    # Support both object-based networks (network.neurons[i].is_inhibitory)
+    # and vectorized networks (network.is_inhibitory as numpy array)
     exc_neurons = set()
     inh_neurons = set()
-    for i, neuron in enumerate(network.neurons):
-        if neuron.is_inhibitory:
-            inh_neurons.add(i)
-        else:
-            exc_neurons.add(i)
+
+    if hasattr(network, 'is_inhibitory') and hasattr(network.is_inhibitory, '__iter__') and not hasattr(network, 'neurons'):
+        # Vectorized network: is_inhibitory is a numpy array
+        for i, is_inh in enumerate(network.is_inhibitory):
+            if is_inh:
+                inh_neurons.add(i)
+            else:
+                exc_neurons.add(i)
+    else:
+        # Object-based network: iterate through neuron objects
+        for i, neuron in enumerate(network.neurons):
+            if neuron.is_inhibitory:
+                inh_neurons.add(i)
+            else:
+                exc_neurons.add(i)
 
     print(f"Network composition: {len(exc_neurons)} excitatory, {len(inh_neurons)} inhibitory neurons")
 
@@ -1012,11 +1042,17 @@ def plot_ei_psth_and_raster(network, activity_record, bin_size=10, dt=0.1,
         ax.spines['right'].set_color(spine_color)
         ax.grid(True, alpha=0.2)
 
-    # Draw stimulation time markers as green vertical lines
+    # Draw stimulation time markers
     if stim_times:
+        stim_color = '#32ff32'
         for stim_time in stim_times:
             for ax in [ax_exc_psth, ax_exc_raster, ax_inh_psth, ax_inh_raster]:
-                ax.axvline(x=stim_time, color='#32ff32', linewidth=0.8, alpha=0.15)
+                if stim_duration_ms and stim_duration_ms > 0:
+                    # Draw shaded blocks showing stimulation duration
+                    ax.axvspan(stim_time, stim_time + stim_duration_ms,
+                              color=stim_color, alpha=0.15, linewidth=0)
+                else:
+                    ax.axvline(x=stim_time, color=stim_color, linewidth=0.8, alpha=0.15)
 
     plt.tight_layout()
 
@@ -1304,13 +1340,25 @@ def plot_ei_frequency_analysis(network, activity_record, dt=0.1, figsize=(14, 8)
     inh_color = '#3498db'  # Blue for inhibitory
 
     # Identify excitatory and inhibitory neurons
+    # Support both object-based networks (network.neurons[i].is_inhibitory)
+    # and vectorized networks (network.is_inhibitory as numpy array)
     exc_neurons = set()
     inh_neurons = set()
-    for i, neuron in enumerate(network.neurons):
-        if neuron.is_inhibitory:
-            inh_neurons.add(i)
-        else:
-            exc_neurons.add(i)
+
+    if hasattr(network, 'is_inhibitory') and hasattr(network.is_inhibitory, '__iter__') and not hasattr(network, 'neurons'):
+        # Vectorized network: is_inhibitory is a numpy array
+        for i, is_inh in enumerate(network.is_inhibitory):
+            if is_inh:
+                inh_neurons.add(i)
+            else:
+                exc_neurons.add(i)
+    else:
+        # Object-based network: iterate through neuron objects
+        for i, neuron in enumerate(network.neurons):
+            if neuron.is_inhibitory:
+                inh_neurons.add(i)
+            else:
+                exc_neurons.add(i)
 
     print(f"Frequency analysis: {len(exc_neurons)} excitatory, {len(inh_neurons)} inhibitory neurons")
 
@@ -1513,13 +1561,25 @@ def plot_ei_synchrony_analysis(network, activity_record, dt=0.1,
     unique_color = '#27ae60'  # Green for unique neurons
 
     # Identify excitatory and inhibitory neurons
+    # Support both object-based networks (network.neurons[i].is_inhibitory)
+    # and vectorized networks (network.is_inhibitory as numpy array)
     exc_neurons = set()
     inh_neurons = set()
-    for i, neuron in enumerate(network.neurons):
-        if neuron.is_inhibitory:
-            inh_neurons.add(i)
-        else:
-            exc_neurons.add(i)
+
+    if hasattr(network, 'is_inhibitory') and hasattr(network.is_inhibitory, '__iter__') and not hasattr(network, 'neurons'):
+        # Vectorized network: is_inhibitory is a numpy array
+        for i, is_inh in enumerate(network.is_inhibitory):
+            if is_inh:
+                inh_neurons.add(i)
+            else:
+                exc_neurons.add(i)
+    else:
+        # Object-based network: iterate through neuron objects
+        for i, neuron in enumerate(network.neurons):
+            if neuron.is_inhibitory:
+                inh_neurons.add(i)
+            else:
+                exc_neurons.add(i)
 
     print(f"Synchrony analysis: {len(exc_neurons)} excitatory, {len(inh_neurons)} inhibitory neurons")
 
@@ -1682,7 +1742,7 @@ def plot_ei_synchrony_analysis(network, activity_record, dt=0.1,
 
 
 def plot_network_activation_percentage(activity_record, n_neurons, dt=0.1, stim_times=None,
-                                        window_ms=5.0, save_path="network_activation.png",
+                                        stim_duration_ms=None, window_ms=5.0, save_path="network_activation.png",
                                         figsize=(14, 6), darkstyle=True):
     """
     Plot the percentage of network activated over time.
@@ -1696,7 +1756,10 @@ def plot_network_activation_percentage(activity_record, n_neurons, dt=0.1, stim_
     dt : float
         Timestep in ms
     stim_times : list or None
-        List of stimulation time points (in ms) - draws vertical lines
+        List of stimulation time points (in ms) - draws vertical lines or blocks
+    stim_duration_ms : float or None
+        Duration of each stimulation period in ms. If provided, draws shaded blocks
+        instead of vertical lines.
     window_ms : float
         Sliding window size in ms for smoothing the activation curve
     save_path : str or None
@@ -1757,7 +1820,12 @@ def plot_network_activation_percentage(activity_record, n_neurons, dt=0.1, stim_
     # Mark stimulation times
     if stim_times:
         for stim_time in stim_times:
-            ax.axvline(x=stim_time, color=stim_color, linewidth=0.5, alpha=0.15)
+            if stim_duration_ms and stim_duration_ms > 0:
+                # Draw shaded blocks showing stimulation duration
+                ax.axvspan(stim_time, stim_time + stim_duration_ms,
+                          color=stim_color, alpha=0.15, linewidth=0)
+            else:
+                ax.axvline(x=stim_time, color=stim_color, linewidth=0.5, alpha=0.15)
 
     # Labels and title
     ax.set_xlabel('Time (ms)', color=text_color, fontsize=12)
@@ -1810,3 +1878,1886 @@ def plot_network_activation_percentage(activity_record, n_neurons, dt=0.1, stim_
     }
 
     return fig, activation_data
+
+
+def plot_inhibitory_effects_analysis(
+    network,
+    neuron_data=None,
+    dt=0.1,
+    figsize=(16, 14),
+    dpi=150,
+    save_path="inhibitory_effects_analysis.png",
+    darkstyle=True
+):
+    """
+    Analyze inhibitory effects on excitatory and inhibitory neuron populations.
+
+    Creates a multi-panel figure showing:
+    - Panel 1: Connection statistics (I->E vs I->I counts and weights)
+    - Panel 2: Weight distribution histograms (I->E vs I->I)
+    - Panels 3-4: Activity-integrated E/I input over time (if neuron_data provided)
+
+    Parameters
+    ----------
+    network : SphericalNeuronalNetworkVectorized or SphericalNeuronalNetwork
+        The network object with weights, is_inhibitory, and graph
+    neuron_data : dict or None
+        Dictionary of tracked neuron data with g_e_history and g_i_history.
+        If None, only static panels (1-2) are generated.
+    dt : float
+        Time step in ms (used for time axis in panels 3-4)
+    figsize : tuple
+        Figure size (width, height)
+    dpi : int
+        Figure resolution
+    save_path : str
+        Path to save the figure
+    darkstyle : bool
+        If True, use dark background style
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The figure object
+    analysis_info : dict
+        Dictionary containing computed statistics
+    """
+    # Style setup
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        text_color = 'white'
+        spine_color = 'white'
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        spine_color = 'black'
+
+    # Color scheme
+    ie_color = '#e74c3c'    # Red for I->E (inhibition of excitatory)
+    ii_color = '#3498db'    # Blue for I->I (inhibition of inhibitory)
+    g_e_color = '#ff9f43'   # Orange for excitatory conductance
+    g_i_color = '#0abde3'   # Cyan for inhibitory conductance
+
+    # Get neuron type indices - support both vectorized and object-based networks
+    if hasattr(network, 'is_inhibitory') and hasattr(network.is_inhibitory, '__len__'):
+        # Vectorized or array-based
+        exc_indices = set(np.where(~network.is_inhibitory)[0])
+        inh_indices = set(np.where(network.is_inhibitory)[0])
+    else:
+        # Object-based
+        exc_indices = set()
+        inh_indices = set()
+        for i, neuron in enumerate(network.neurons):
+            if neuron.is_inhibitory:
+                inh_indices.add(i)
+            else:
+                exc_indices.add(i)
+
+    n_exc = len(exc_indices)
+    n_inh = len(inh_indices)
+
+    print(f"Analyzing inhibitory effects: {n_exc} E neurons, {n_inh} I neurons")
+
+    # Collect inhibitory connection data
+    ie_weights = []  # I->E weights
+    ii_weights = []  # I->I weights
+
+    # Count incoming inhibitory connections per neuron type
+    e_incoming_inh_counts = []  # Number of I inputs per E neuron
+    i_incoming_inh_counts = []  # Number of I inputs per I neuron
+
+    for j in range(network.n_neurons):
+        incoming_inh_count = 0
+        for i in network.graph.predecessors(j):
+            if i in inh_indices:
+                weight = network.weights[i, j]
+                incoming_inh_count += 1
+                if j in exc_indices:
+                    ie_weights.append(weight)
+                else:
+                    ii_weights.append(weight)
+
+        if j in exc_indices:
+            e_incoming_inh_counts.append(incoming_inh_count)
+        else:
+            i_incoming_inh_counts.append(incoming_inh_count)
+
+    ie_weights = np.array(ie_weights)
+    ii_weights = np.array(ii_weights)
+
+    # Compute statistics
+    ie_count = len(ie_weights)
+    ii_count = len(ii_weights)
+    ie_total = np.sum(np.abs(ie_weights)) if len(ie_weights) > 0 else 0
+    ii_total = np.sum(np.abs(ii_weights)) if len(ii_weights) > 0 else 0
+    ie_mean = np.mean(ie_weights) if len(ie_weights) > 0 else 0
+    ii_mean = np.mean(ii_weights) if len(ii_weights) > 0 else 0
+    ie_per_target = np.mean(e_incoming_inh_counts) if e_incoming_inh_counts else 0
+    ii_per_target = np.mean(i_incoming_inh_counts) if i_incoming_inh_counts else 0
+
+    # Determine layout based on whether we have dynamic data
+    has_dynamic_data = (neuron_data is not None and len(neuron_data) > 0)
+
+    if has_dynamic_data:
+        # 4-panel layout
+        fig = plt.figure(figsize=figsize, dpi=dpi, facecolor=bg_color)
+        gs = GridSpec(3, 2, height_ratios=[1, 1, 1], hspace=0.35, wspace=0.25)
+        ax_stats = fig.add_subplot(gs[0, 0])
+        ax_hist = fig.add_subplot(gs[0, 1])
+        ax_e_input = fig.add_subplot(gs[1, :])
+        ax_i_input = fig.add_subplot(gs[2, :])
+    else:
+        # 2-panel layout (static only)
+        fig = plt.figure(figsize=(figsize[0], figsize[1] * 0.4), dpi=dpi, facecolor=bg_color)
+        gs = GridSpec(1, 2, wspace=0.25)
+        ax_stats = fig.add_subplot(gs[0, 0])
+        ax_hist = fig.add_subplot(gs[0, 1])
+
+    fig.suptitle('Inhibitory Effects Analysis', fontsize=16, color=text_color, y=0.98)
+
+    # ========== PANEL 1: CONNECTION STATISTICS ==========
+    metrics = ['Connections', 'Total |Weight|', 'Mean Weight', 'Per Target']
+    ie_values = [ie_count, ie_total, abs(ie_mean), ie_per_target]
+    ii_values = [ii_count, ii_total, abs(ii_mean), ii_per_target]
+
+    x = np.arange(len(metrics))
+    width = 0.35
+
+    # Normalize for better visualization (different scales)
+    max_vals = [max(ie_values[i], ii_values[i], 1e-10) for i in range(len(metrics))]
+    ie_norm = [ie_values[i] / max_vals[i] for i in range(len(metrics))]
+    ii_norm = [ii_values[i] / max_vals[i] for i in range(len(metrics))]
+
+    bars1 = ax_stats.bar(x - width/2, ie_norm, width, label=f'I→E (n={ie_count})',
+                          color=ie_color, alpha=0.8)
+    bars2 = ax_stats.bar(x + width/2, ii_norm, width, label=f'I→I (n={ii_count})',
+                          color=ii_color, alpha=0.8)
+
+    # Add value labels
+    for bar, val in zip(bars1, ie_values):
+        height = bar.get_height()
+        ax_stats.annotate(f'{val:.1f}' if val < 1000 else f'{val:.0f}',
+                         xy=(bar.get_x() + bar.get_width()/2, height),
+                         xytext=(0, 3), textcoords="offset points",
+                         ha='center', va='bottom', fontsize=8, color=text_color)
+
+    for bar, val in zip(bars2, ii_values):
+        height = bar.get_height()
+        ax_stats.annotate(f'{val:.1f}' if val < 1000 else f'{val:.0f}',
+                         xy=(bar.get_x() + bar.get_width()/2, height),
+                         xytext=(0, 3), textcoords="offset points",
+                         ha='center', va='bottom', fontsize=8, color=text_color)
+
+    ax_stats.set_ylabel('Normalized Value', color=text_color)
+    ax_stats.set_title('Inhibitory Connection Statistics', color=text_color, fontsize=12)
+    ax_stats.set_xticks(x)
+    ax_stats.set_xticklabels(metrics, fontsize=9)
+    ax_stats.legend(loc='upper right', facecolor=bg_color, edgecolor=spine_color,
+                    labelcolor=text_color)
+    ax_stats.set_ylim(0, 1.4)
+
+    # ========== PANEL 2: WEIGHT DISTRIBUTIONS ==========
+    if len(ie_weights) > 0:
+        ax_hist.hist(ie_weights, bins=30, color=ie_color, alpha=0.6,
+                     label=f'I→E (μ={ie_mean:.3f})', edgecolor='white', linewidth=0.5)
+        ax_hist.axvline(ie_mean, color=ie_color, linestyle='--', linewidth=2)
+
+    if len(ii_weights) > 0:
+        ax_hist.hist(ii_weights, bins=30, color=ii_color, alpha=0.6,
+                     label=f'I→I (μ={ii_mean:.3f})', edgecolor='white', linewidth=0.5)
+        ax_hist.axvline(ii_mean, color=ii_color, linestyle='--', linewidth=2)
+
+    ax_hist.axvline(0, color=spine_color, linestyle='-', linewidth=0.5, alpha=0.5)
+    ax_hist.set_xlabel('Weight (negative = inhibitory)', color=text_color)
+    ax_hist.set_ylabel('Count', color=text_color)
+    ax_hist.set_title('Inhibitory Weight Distributions', color=text_color, fontsize=12)
+    ax_hist.legend(loc='upper left', facecolor=bg_color, edgecolor=spine_color,
+                   labelcolor=text_color)
+
+    # ========== PANELS 3-4: DYNAMIC INPUT ANALYSIS ==========
+    e_tracked_indices = []
+    i_tracked_indices = []
+    mean_e_g_e = None
+    mean_e_g_i = None
+    mean_i_g_e = None
+    mean_i_g_i = None
+
+    if has_dynamic_data:
+        # Separate tracked neurons by type
+        for idx in neuron_data.keys():
+            if neuron_data[idx]['is_inhibitory']:
+                i_tracked_indices.append(idx)
+            else:
+                e_tracked_indices.append(idx)
+
+        print(f"Tracked neurons for dynamic analysis: {len(e_tracked_indices)} E, {len(i_tracked_indices)} I")
+
+        # Panel 3: Excitatory neurons
+        if len(e_tracked_indices) > 0:
+            n_steps = len(neuron_data[e_tracked_indices[0]]['g_e_history'])
+            time_ms = np.arange(n_steps) * dt
+
+            e_g_e = np.array([neuron_data[idx]['g_e_history'] for idx in e_tracked_indices])
+            e_g_i = np.array([neuron_data[idx]['g_i_history'] for idx in e_tracked_indices])
+
+            mean_e_g_e = np.mean(e_g_e, axis=0)
+            mean_e_g_i = np.mean(e_g_i, axis=0)
+            std_e_g_e = np.std(e_g_e, axis=0)
+            std_e_g_i = np.std(e_g_i, axis=0)
+
+            ax_e_input.plot(time_ms, mean_e_g_e, color=g_e_color, linewidth=1.5,
+                           label='Excitatory input (g_e)')
+            ax_e_input.fill_between(time_ms, mean_e_g_e - std_e_g_e, mean_e_g_e + std_e_g_e,
+                                   color=g_e_color, alpha=0.2)
+            ax_e_input.plot(time_ms, mean_e_g_i, color=g_i_color, linewidth=1.5,
+                           label='Inhibitory input (g_i)')
+            ax_e_input.fill_between(time_ms, mean_e_g_i - std_e_g_i, mean_e_g_i + std_e_g_i,
+                                   color=g_i_color, alpha=0.2)
+
+            ax_e_input.set_xlabel('Time (ms)', color=text_color)
+            ax_e_input.set_ylabel('Conductance', color=text_color)
+            ax_e_input.set_title(f'E/I Input to Excitatory Neurons (n={len(e_tracked_indices)})',
+                                color=text_color, fontsize=12)
+            ax_e_input.legend(loc='upper right', facecolor=bg_color, edgecolor=spine_color,
+                             labelcolor=text_color)
+
+            # Add integrated values as text
+            total_g_e = np.sum(mean_e_g_e) * dt
+            total_g_i = np.sum(mean_e_g_i) * dt
+            ax_e_input.text(0.02, 0.95, f'Integrated: g_e={total_g_e:.1f}, g_i={total_g_i:.1f}',
+                           transform=ax_e_input.transAxes, fontsize=10, color=text_color,
+                           verticalalignment='top',
+                           bbox=dict(boxstyle='round', facecolor=bg_color, alpha=0.8, edgecolor=spine_color))
+
+        # Panel 4: Inhibitory neurons
+        if len(i_tracked_indices) > 0:
+            n_steps = len(neuron_data[i_tracked_indices[0]]['g_e_history'])
+            time_ms = np.arange(n_steps) * dt
+
+            i_g_e = np.array([neuron_data[idx]['g_e_history'] for idx in i_tracked_indices])
+            i_g_i = np.array([neuron_data[idx]['g_i_history'] for idx in i_tracked_indices])
+
+            mean_i_g_e = np.mean(i_g_e, axis=0)
+            mean_i_g_i = np.mean(i_g_i, axis=0)
+            std_i_g_e = np.std(i_g_e, axis=0)
+            std_i_g_i = np.std(i_g_i, axis=0)
+
+            ax_i_input.plot(time_ms, mean_i_g_e, color=g_e_color, linewidth=1.5,
+                           label='Excitatory input (g_e)')
+            ax_i_input.fill_between(time_ms, mean_i_g_e - std_i_g_e, mean_i_g_e + std_i_g_e,
+                                   color=g_e_color, alpha=0.2)
+            ax_i_input.plot(time_ms, mean_i_g_i, color=g_i_color, linewidth=1.5,
+                           label='Inhibitory input (g_i)')
+            ax_i_input.fill_between(time_ms, mean_i_g_i - std_i_g_i, mean_i_g_i + std_i_g_i,
+                                   color=g_i_color, alpha=0.2)
+
+            ax_i_input.set_xlabel('Time (ms)', color=text_color)
+            ax_i_input.set_ylabel('Conductance', color=text_color)
+            ax_i_input.set_title(f'E/I Input to Inhibitory Neurons (n={len(i_tracked_indices)})',
+                                color=text_color, fontsize=12)
+            ax_i_input.legend(loc='upper right', facecolor=bg_color, edgecolor=spine_color,
+                             labelcolor=text_color)
+
+            # Add integrated values as text
+            total_g_e = np.sum(mean_i_g_e) * dt
+            total_g_i = np.sum(mean_i_g_i) * dt
+            ax_i_input.text(0.02, 0.95, f'Integrated: g_e={total_g_e:.1f}, g_i={total_g_i:.1f}',
+                           transform=ax_i_input.transAxes, fontsize=10, color=text_color,
+                           verticalalignment='top',
+                           bbox=dict(boxstyle='round', facecolor=bg_color, alpha=0.8, edgecolor=spine_color))
+
+    # Style all axes
+    all_axes = [ax_stats, ax_hist]
+    if has_dynamic_data:
+        all_axes.extend([ax_e_input, ax_i_input])
+
+    for ax in all_axes:
+        ax.set_facecolor(bg_color)
+        ax.tick_params(colors=text_color)
+        for spine in ax.spines.values():
+            spine.set_color(spine_color)
+        ax.grid(True, alpha=0.2)
+
+    plt.tight_layout()
+
+    # Save figure
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, bbox_inches='tight', facecolor=fig.get_facecolor())
+        print(f"Saved inhibitory effects analysis to {save_path}")
+
+    # Build return info
+    analysis_info = {
+        'ie_connection_count': ie_count,
+        'ii_connection_count': ii_count,
+        'ie_total_weight': ie_total,
+        'ii_total_weight': ii_total,
+        'ie_mean_weight': ie_mean,
+        'ii_mean_weight': ii_mean,
+        'ie_per_target': ie_per_target,
+        'ii_per_target': ii_per_target,
+        'e_neurons_tracked': len(e_tracked_indices),
+        'i_neurons_tracked': len(i_tracked_indices),
+    }
+
+    if has_dynamic_data and len(e_tracked_indices) > 0 and mean_e_g_e is not None:
+        analysis_info['e_neuron_mean_total_g_e'] = float(np.sum(mean_e_g_e) * dt)
+        analysis_info['e_neuron_mean_total_g_i'] = float(np.sum(mean_e_g_i) * dt)
+
+    if has_dynamic_data and len(i_tracked_indices) > 0 and mean_i_g_e is not None:
+        analysis_info['i_neuron_mean_total_g_e'] = float(np.sum(mean_i_g_e) * dt)
+        analysis_info['i_neuron_mean_total_g_i'] = float(np.sum(mean_i_g_i) * dt)
+
+    return fig, analysis_info
+
+
+def plot_stimulation_figure(network, neuron_data, stimulation_record, activity_record,
+                            dt=0.1, stim_interval=None, stim_strength=10.0,
+                            figsize=(14, 10), dpi=150,
+                            save_path="stimulation_figure.png", darkstyle=True):
+    """
+    Create a comprehensive stimulation analysis figure showing:
+    1. Top panel: Net stimulatory drive to the network (# neurons × current strength)
+    2. Middle panel: Network response - spikes from stimulated vs non-stimulated neurons
+    3. Bottom panel: Cumulative effect - how stimulation propagates through network
+
+    Parameters:
+    -----------
+    network : SphericalNeuronalNetworkVectorized
+        The network object (used to identify stimulated neurons)
+    neuron_data : dict
+        Dictionary mapping neuron indices to their recorded data (not used in revamped version)
+    stimulation_record : dict
+        Dictionary with 'times' (list of stim times in ms) and 'neurons' (list of lists of stimulated neuron indices)
+    activity_record : list
+        List of lists containing active neuron indices at each timestep
+    dt : float
+        Timestep in ms
+    stim_interval : float or None
+        Stimulation interval in ms (for labeling)
+    stim_strength : float
+        Current injection strength per neuron (for calculating total drive)
+    figsize : tuple
+        Figure size (width, height)
+    dpi : int
+        Figure resolution
+    save_path : str
+        Path to save the figure
+    darkstyle : bool
+        If True, use dark background. If False, use light background
+
+    Returns:
+    --------
+    fig : matplotlib.figure.Figure
+        The figure object
+    stim_info : dict
+        Summary statistics about stimulation effects
+    """
+    from matplotlib.gridspec import GridSpec
+
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        text_color = 'white'
+        spine_color = 'white'
+        stim_color = '#32ff32'      # Green for stimulation
+        stim_spike_color = '#98fb98'  # Light green for stimulated neuron spikes
+        network_color = '#ff6b6b'   # Red for non-stimulated spikes
+        total_color = '#ffd93d'     # Yellow for total
+        grid_alpha = 0.2
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        spine_color = 'black'
+        stim_color = '#2ecc71'
+        stim_spike_color = '#27ae60'
+        network_color = '#e74c3c'
+        total_color = '#f39c12'
+        grid_alpha = 0.3
+
+    # Extract stimulation data
+    stim_times_list = stimulation_record.get('times', [])
+    stim_neurons_list = stimulation_record.get('neurons', [])
+
+    if not stim_times_list:
+        print("Warning: No stimulation events recorded. Cannot create stimulation figure.")
+        return None, {}
+
+    # Build set of all neurons that ever received stimulation
+    all_stim_neurons = set()
+    for neurons in stim_neurons_list:
+        all_stim_neurons.update(neurons)
+
+    print(f"Creating stimulation analysis figure...")
+    print(f"  Total stimulation events: {len(stim_times_list)}")
+    print(f"  Unique neurons stimulated: {len(all_stim_neurons)}")
+
+    # Calculate total simulation time
+    n_steps = len(activity_record)
+    total_time = n_steps * dt
+    time_axis = np.arange(n_steps) * dt
+
+    # === Compute time series data ===
+
+    # 1. Stimulation drive: number of neurons receiving stim at each timestep × strength
+    stim_neuron_count = np.zeros(n_steps)
+    for stim_time, stim_neurons in zip(stim_times_list, stim_neurons_list):
+        timestep = int(stim_time / dt)
+        if 0 <= timestep < n_steps:
+            stim_neuron_count[timestep] = len(stim_neurons)
+
+    stim_drive = stim_neuron_count * stim_strength  # Total current injected
+
+    # 2. Spike counts: separate stimulated vs non-stimulated neurons
+    stim_neuron_spikes = np.zeros(n_steps)      # Spikes from neurons that receive stimulation
+    non_stim_neuron_spikes = np.zeros(n_steps)  # Spikes from neurons that don't receive stimulation
+
+    for t_idx, active_neurons in enumerate(activity_record):
+        for neuron_idx in active_neurons:
+            if neuron_idx in all_stim_neurons:
+                stim_neuron_spikes[t_idx] += 1
+            else:
+                non_stim_neuron_spikes[t_idx] += 1
+
+    total_spikes = stim_neuron_spikes + non_stim_neuron_spikes
+
+    # 3. Compute smoothed versions for visualization (rolling average)
+    window_size = max(1, int(10 / dt))  # 10ms smoothing window
+    kernel = np.ones(window_size) / window_size
+
+    stim_drive_smooth = np.convolve(stim_drive, kernel, mode='same')
+    stim_spikes_smooth = np.convolve(stim_neuron_spikes, kernel, mode='same')
+    non_stim_spikes_smooth = np.convolve(non_stim_neuron_spikes, kernel, mode='same')
+    total_spikes_smooth = np.convolve(total_spikes, kernel, mode='same')
+
+    # === Create figure ===
+    fig = plt.figure(figsize=figsize, facecolor=bg_color)
+    gs = GridSpec(3, 1, figure=fig, height_ratios=[1, 1.5, 1.5], hspace=0.25)
+
+    # === Panel 1: Net Stimulatory Drive ===
+    ax1 = fig.add_subplot(gs[0])
+    ax1.set_facecolor(bg_color)
+
+    # Plot smoothed drive only (cleaner) with subtle fill
+    ax1.fill_between(time_axis, stim_drive_smooth, alpha=0.15, color=stim_color)
+    ax1.plot(time_axis, stim_drive_smooth, color=stim_color, linewidth=0.8,
+             label=f'Stim drive (smoothed {window_size * dt:.0f}ms)')
+
+    # Add stim interval markers - very subtle
+    if stim_interval:
+        interval_starts = np.arange(stim_interval, total_time, stim_interval)
+        for i, t in enumerate(interval_starts):
+            ax1.axvline(x=t, color=stim_color, linestyle='--', alpha=0.15, linewidth=0.5)
+
+    ax1.set_xlim(0, total_time)
+    ax1.set_ylim(bottom=0)
+    ax1.set_ylabel('Net Stim Drive\n(# neurons × I)', color=text_color, fontsize=10)
+    ax1.set_title('Stimulation Input to Network', color=text_color, fontsize=12, fontweight='bold')
+    ax1.tick_params(colors=text_color, labelsize=9)
+    ax1.set_xticklabels([])
+    for spine in ax1.spines.values():
+        spine.set_color(spine_color)
+    ax1.grid(True, alpha=grid_alpha, axis='both')
+    ax1.legend(loc='upper right', fontsize=8, facecolor=bg_color,
+               edgecolor=spine_color, labelcolor=text_color)
+
+    # Add text annotation for peak drive
+    peak_drive = np.max(stim_drive)
+    peak_time = time_axis[np.argmax(stim_drive)]
+    ax1.annotate(f'Peak: {peak_drive:.0f}', xy=(peak_time, peak_drive),
+                 xytext=(peak_time + total_time * 0.05, peak_drive * 0.9),
+                 color=text_color, fontsize=8,
+                 arrowprops=dict(arrowstyle='->', color=text_color, lw=0.5))
+
+    # === Panel 2: Network Response - Lines instead of stacked areas ===
+    ax2 = fig.add_subplot(gs[1])
+    ax2.set_facecolor(bg_color)
+
+    # Plot as lines with subtle fills - much cleaner than heavy stacked areas
+    ax2.fill_between(time_axis, stim_spikes_smooth, alpha=0.2, color=stim_spike_color)
+    ax2.plot(time_axis, stim_spikes_smooth, color=stim_spike_color, linewidth=0.8,
+             label=f'Stimulated neurons (n={len(all_stim_neurons)})')
+
+    ax2.fill_between(time_axis, non_stim_spikes_smooth, alpha=0.2, color=network_color)
+    ax2.plot(time_axis, non_stim_spikes_smooth, color=network_color, linewidth=0.8,
+             label=f'Non-stimulated neurons (n={network.n_neurons - len(all_stim_neurons)})')
+
+    # Total line
+    ax2.plot(time_axis, total_spikes_smooth, color=total_color, linewidth=1.0,
+             linestyle='-', label='Total spikes', alpha=0.8)
+
+    # Add stim interval markers - very subtle
+    if stim_interval:
+        for t in interval_starts:
+            ax2.axvline(x=t, color=stim_color, linestyle='--', alpha=0.15, linewidth=0.5)
+
+    ax2.set_xlim(0, total_time)
+    ax2.set_ylim(bottom=0)
+    ax2.set_ylabel('Spikes per\nTimestep', color=text_color, fontsize=10)
+    ax2.set_title('Network Response: Stimulated vs Non-Stimulated Neurons',
+                  color=text_color, fontsize=12, fontweight='bold')
+    ax2.tick_params(colors=text_color, labelsize=9)
+    ax2.set_xticklabels([])
+    for spine in ax2.spines.values():
+        spine.set_color(spine_color)
+    ax2.grid(True, alpha=grid_alpha, axis='both')
+    ax2.legend(loc='upper right', fontsize=8, facecolor=bg_color,
+               edgecolor=spine_color, labelcolor=text_color)
+
+    # === Panel 3: Amplification Ratio ===
+    ax3 = fig.add_subplot(gs[2])
+    ax3.set_facecolor(bg_color)
+
+    # Calculate ratio of total spikes to stimulated neuron count (amplification)
+    # Avoid division by zero
+    with np.errstate(divide='ignore', invalid='ignore'):
+        # Ratio: how many total spikes per neuron stimulated
+        amplification = np.where(stim_neuron_count > 0,
+                                 total_spikes / stim_neuron_count,
+                                 0)
+
+    # Smooth the amplification
+    amplification_smooth = np.convolve(amplification, kernel, mode='same')
+
+    # Also compute fraction of spikes from non-stimulated neurons
+    with np.errstate(divide='ignore', invalid='ignore'):
+        cascade_fraction = np.where(total_spikes > 0,
+                                    non_stim_neuron_spikes / total_spikes,
+                                    0)
+    cascade_fraction_smooth = np.convolve(cascade_fraction, kernel, mode='same')
+
+    # Plot on twin axes - subtle fills and thin lines
+    ax3.fill_between(time_axis, amplification_smooth, alpha=0.15, color=total_color)
+    ax3.plot(time_axis, amplification_smooth, color=total_color, linewidth=0.8,
+             label='Spikes per stim neuron')
+
+    ax3_twin = ax3.twinx()
+    ax3_twin.plot(time_axis, cascade_fraction_smooth * 100, color=network_color,
+                  linewidth=0.8, linestyle='--', label='% from cascade')
+
+    # Add stim interval markers - very subtle
+    if stim_interval:
+        for t in interval_starts:
+            ax3.axvline(x=t, color=stim_color, linestyle='--', alpha=0.15, linewidth=0.5)
+
+    ax3.set_xlim(0, total_time)
+    ax3.set_ylim(bottom=0)
+    ax3.set_xlabel('Time (ms)', color=text_color, fontsize=10)
+    ax3.set_ylabel('Spikes per\nStim Neuron', color=total_color, fontsize=10)
+    ax3_twin.set_ylabel('Cascade %', color=network_color, fontsize=10)
+    ax3.set_title('Stimulation Amplification & Cascade Effect',
+                  color=text_color, fontsize=12, fontweight='bold')
+
+    ax3.tick_params(colors=text_color, labelsize=9)
+    ax3_twin.tick_params(colors=network_color, labelsize=9)
+    ax3_twin.spines['right'].set_color(network_color)
+
+    for spine in ['top', 'bottom', 'left']:
+        ax3.spines[spine].set_color(spine_color)
+    ax3.grid(True, alpha=grid_alpha, axis='both')
+
+    # Combined legend
+    lines1, labels1 = ax3.get_legend_handles_labels()
+    lines2, labels2 = ax3_twin.get_legend_handles_labels()
+    ax3.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=8,
+               facecolor=bg_color, edgecolor=spine_color, labelcolor=text_color)
+
+    # === Add summary statistics as text ===
+    total_stim_spikes = int(np.sum(stim_neuron_spikes))
+    total_cascade_spikes = int(np.sum(non_stim_neuron_spikes))
+    total_all_spikes = total_stim_spikes + total_cascade_spikes
+    mean_amplification = total_all_spikes / len(all_stim_neurons) if len(all_stim_neurons) > 0 else 0
+    cascade_pct = 100 * total_cascade_spikes / total_all_spikes if total_all_spikes > 0 else 0
+
+    summary_text = (f"Summary:\n"
+                    f"  Stim neurons: {len(all_stim_neurons):,}\n"
+                    f"  Stim neuron spikes: {total_stim_spikes:,}\n"
+                    f"  Cascade spikes: {total_cascade_spikes:,}\n"
+                    f"  Cascade fraction: {cascade_pct:.1f}%\n"
+                    f"  Amplification: {mean_amplification:.1f}x")
+
+    fig.text(0.02, 0.02, summary_text, transform=fig.transFigure,
+             fontsize=9, color=text_color, family='monospace',
+             verticalalignment='bottom',
+             bbox=dict(boxstyle='round', facecolor=bg_color, edgecolor=spine_color, alpha=0.8))
+
+    plt.tight_layout()
+
+    # Save figure
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, bbox_inches='tight', facecolor=fig.get_facecolor())
+        print(f"Saved stimulation analysis figure to {save_path}")
+
+    # Build summary info
+    stim_info = {
+        'total_stim_events': len(stim_times_list),
+        'unique_neurons_stimulated': len(all_stim_neurons),
+        'stim_neuron_spikes': total_stim_spikes,
+        'cascade_spikes': total_cascade_spikes,
+        'total_spikes': total_all_spikes,
+        'cascade_fraction': cascade_pct / 100,
+        'mean_amplification': mean_amplification,
+        'peak_stim_drive': float(peak_drive)
+    }
+
+    return fig, stim_info
+
+
+def plot_membrane_potential_traces(network, neuron_data, activity_record, dt=0.1,
+                                   n_excitatory=3, n_inhibitory=3,
+                                   figsize=(16, 14), dpi=200,
+                                   save_path="membrane_potential_traces.png",
+                                   darkstyle=True,
+                                   stim_times=None, stim_duration_ms=None):
+    """
+    Create high-resolution membrane potential traces for selected neurons with activity.
+
+    Randomly selects excitatory and inhibitory neurons that have spiked during the
+    simulation and plots their membrane potential over time with action potentials marked.
+    Includes a final panel showing the sum of all tracked neurons' membrane potentials.
+
+    Parameters:
+    -----------
+    network : SphericalNeuronalNetworkVectorized
+        The network object (used to get neuron properties like threshold)
+    neuron_data : dict
+        Dictionary mapping neuron indices to their recorded data:
+        {idx: {'v_history': [...], 'spike_times': [...], 'is_inhibitory': bool}}
+    activity_record : list
+        List of lists containing active neuron indices at each timestep
+    dt : float
+        Timestep in ms
+    n_excitatory : int
+        Number of excitatory neurons to plot (default 3)
+    n_inhibitory : int
+        Number of inhibitory neurons to plot (default 3)
+    figsize : tuple
+        Figure size (width, height)
+    dpi : int
+        Figure resolution (default 200 for high quality)
+    save_path : str
+        Path to save the figure
+    darkstyle : bool
+        If True, use dark background. If False, use light background
+    stim_times : list, optional
+        List of stimulation start times in ms. If provided, translucent green shading
+        will be added during stimulation periods.
+    stim_duration_ms : float, optional
+        Duration of each stimulation period in ms. Required if stim_times is provided.
+
+    Returns:
+    --------
+    fig : matplotlib.figure.Figure
+        The figure object
+    selected_neurons : dict
+        Dictionary with 'excitatory' and 'inhibitory' lists of selected neuron indices
+    """
+    from matplotlib.gridspec import GridSpec
+
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        text_color = 'white'
+        spine_color = 'white'
+        exc_color = '#ff6b6b'       # Red for excitatory
+        inh_color = '#4dabf7'       # Blue for inhibitory
+        threshold_color = '#ff9f43'  # Orange for threshold
+        spike_color = '#ffd93d'      # Yellow for spike markers
+        rest_color = '#888888'       # Gray for resting potential
+        stim_color = '#32ff32'       # Green for stimulation periods
+        sum_color = '#b19cd9'        # Light purple for sum trace
+        grid_alpha = 0.15
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        spine_color = 'black'
+        exc_color = '#e74c3c'
+        inh_color = '#3498db'
+        threshold_color = '#e67e22'
+        spike_color = '#f39c12'
+        rest_color = '#7f8c8d'
+        stim_color = '#2ecc71'       # Green for stimulation periods
+        sum_color = '#9b59b6'        # Purple for sum trace
+        grid_alpha = 0.3
+
+    # Find neurons with activity from neuron_data
+    exc_neurons_with_spikes = []
+    inh_neurons_with_spikes = []
+
+    for idx, data in neuron_data.items():
+        spike_times = data.get('spike_times', [])
+        v_history = data.get('v_history', [])
+        is_inhibitory = data.get('is_inhibitory', False)
+
+        # Only consider neurons with both voltage data and spikes
+        if len(v_history) > 0 and len(spike_times) > 0:
+            if is_inhibitory:
+                inh_neurons_with_spikes.append((idx, len(spike_times)))
+            else:
+                exc_neurons_with_spikes.append((idx, len(spike_times)))
+
+    if len(exc_neurons_with_spikes) == 0 and len(inh_neurons_with_spikes) == 0:
+        print("Warning: No tracked neurons with spikes found. Cannot create membrane potential figure.")
+        return None, {}
+
+    # Sort by spike count and select neurons with good activity
+    exc_neurons_with_spikes.sort(key=lambda x: x[1], reverse=True)
+    inh_neurons_with_spikes.sort(key=lambda x: x[1], reverse=True)
+
+    # Select neurons - prefer ones with moderate activity (not too much, not too little)
+    # Take from the middle-to-high activity range for interesting traces
+    n_exc_available = len(exc_neurons_with_spikes)
+    n_inh_available = len(inh_neurons_with_spikes)
+
+    selected_exc = []
+    selected_inh = []
+
+    if n_exc_available > 0:
+        # Take from top half of active neurons, randomly sample
+        top_half_exc = exc_neurons_with_spikes[:max(1, n_exc_available // 2 + 2)]
+        np.random.shuffle(top_half_exc)
+        selected_exc = [x[0] for x in top_half_exc[:min(n_excitatory, len(top_half_exc))]]
+
+    if n_inh_available > 0:
+        top_half_inh = inh_neurons_with_spikes[:max(1, n_inh_available // 2 + 2)]
+        np.random.shuffle(top_half_inh)
+        selected_inh = [x[0] for x in top_half_inh[:min(n_inhibitory, len(top_half_inh))]]
+
+    total_neurons = len(selected_exc) + len(selected_inh)
+
+    if total_neurons == 0:
+        print("Warning: Could not select any neurons with activity.")
+        return None, {}
+
+    print(f"Creating membrane potential traces for {len(selected_exc)} E and {len(selected_inh)} I neurons...")
+
+    # Calculate total simulation time
+    total_time = len(activity_record) * dt
+
+    # Create figure - extra row for the sum panel
+    fig = plt.figure(figsize=figsize, facecolor=bg_color)
+
+    # Create GridSpec - one row per neuron + 1 for sum panel at bottom
+    gs = GridSpec(total_neurons + 1, 1, figure=fig, hspace=0.4)
+
+    all_selected = selected_exc + selected_inh
+    neuron_types = ['E'] * len(selected_exc) + ['I'] * len(selected_inh)
+    trace_colors = [exc_color] * len(selected_exc) + [inh_color] * len(selected_inh)
+
+    # Helper function to add stimulation shading to an axis
+    def add_stim_shading(ax, stim_times, stim_duration_ms, y_min, y_max):
+        """Add translucent green shading during stimulation periods."""
+        if stim_times is not None and stim_duration_ms is not None:
+            for stim_start in stim_times:
+                stim_end = stim_start + stim_duration_ms
+                ax.axvspan(stim_start, stim_end, alpha=0.12, color=stim_color, zorder=0)
+
+    # Collect all v_histories for sum calculation
+    all_v_histories = []
+    common_length = None
+
+    for panel_idx, (neuron_idx, neuron_type, trace_color) in enumerate(zip(all_selected, neuron_types, trace_colors)):
+        ax = fig.add_subplot(gs[panel_idx])
+        ax.set_facecolor(bg_color)
+
+        # Get neuron data
+        data = neuron_data[neuron_idx]
+        v_history = np.array(data['v_history'])
+        spike_times = data['spike_times']
+
+        # Track for sum calculation
+        all_v_histories.append(v_history)
+        if common_length is None:
+            common_length = len(v_history)
+        else:
+            common_length = min(common_length, len(v_history))
+
+        # Create time axis
+        time_axis = np.arange(len(v_history)) * dt
+
+        # Get neuron-specific parameters (use actual values from network)
+        if hasattr(network, 'v_threshold'):
+            v_thresh = network.v_threshold[neuron_idx]
+        else:
+            v_thresh = -50.0
+
+        if hasattr(network, 'v_rest'):
+            v_rest = network.v_rest[neuron_idx]
+        else:
+            v_rest = -65.0
+
+        if hasattr(network, 'v_reset'):
+            v_reset = network.v_reset[neuron_idx]
+        else:
+            v_reset = -70.0
+
+        # Set y-limits with some padding (compute before adding shading)
+        v_min = min(np.min(v_history), v_reset) - 5
+        v_max = v_thresh + 10
+
+        # Add stimulation period shading (before plotting traces so it's behind)
+        add_stim_shading(ax, stim_times, stim_duration_ms, v_min, v_max)
+
+        # Plot membrane potential trace - thin line for clarity
+        ax.plot(time_axis, v_history, color=trace_color, linewidth=0.5, alpha=0.85,
+                label=f'V_m')
+
+        # Add threshold line - subtle (use neuron's actual threshold)
+        ax.axhline(y=v_thresh, color=threshold_color, linestyle='--', linewidth=0.8,
+                   alpha=0.5, label=f'Threshold ({v_thresh:.1f} mV)')
+
+        # Add resting potential line - very subtle
+        ax.axhline(y=v_rest, color=rest_color, linestyle=':', linewidth=0.6,
+                   alpha=0.3, label=f'V_rest ({v_rest:.1f} mV)')
+
+        # Mark action potentials with small tick marks at top of plot only
+        # No vertical lines through the trace - just small markers
+        spike_times_in_range = [t for t in spike_times if t <= time_axis[-1]]
+        if spike_times_in_range:
+            # Plot small tick marks at the top
+            ax.scatter(spike_times_in_range, [v_thresh + 8] * len(spike_times_in_range),
+                      marker='|', s=15, color=spike_color, alpha=0.7, linewidths=0.5)
+
+        # Styling
+        ax.set_xlim(0, min(total_time, time_axis[-1]))
+        ax.set_ylim(v_min, v_max)
+
+        # Labels
+        n_spikes = len(spike_times)
+        firing_rate = n_spikes / (time_axis[-1] / 1000) if time_axis[-1] > 0 else 0
+
+        ax.set_ylabel(f'Neuron {neuron_idx}\n({neuron_type})\nmV', color=text_color,
+                      fontsize=10, fontweight='bold')
+
+        # Add neuron info as text
+        info_text = f'Spikes: {n_spikes} | Rate: {firing_rate:.1f} Hz'
+        ax.text(0.99, 0.95, info_text, transform=ax.transAxes,
+                fontsize=9, color=text_color, ha='right', va='top',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor=bg_color,
+                          edgecolor=spine_color, alpha=0.8))
+
+        # Tick styling
+        ax.tick_params(colors=text_color, labelsize=9)
+        for spine in ax.spines.values():
+            spine.set_color(spine_color)
+        ax.grid(True, alpha=grid_alpha, axis='both')
+
+        # Hide x-axis labels for all individual neuron panels (sum panel will have them)
+        ax.set_xticklabels([])
+
+        # Add legend only on first panel
+        if panel_idx == 0:
+            ax.legend(loc='upper left', fontsize=8, facecolor=bg_color,
+                      edgecolor=spine_color, labelcolor=text_color, ncol=3)
+
+    # === Create the sum panel at the bottom ===
+    ax_sum = fig.add_subplot(gs[total_neurons])
+    ax_sum.set_facecolor(bg_color)
+
+    # Calculate sum of all tracked neuron potentials (truncate to common length)
+    v_sum = np.zeros(common_length)
+    for v_hist in all_v_histories:
+        v_sum += v_hist[:common_length]
+
+    time_axis_sum = np.arange(common_length) * dt
+
+    # Add stimulation shading to sum panel
+    sum_min = np.min(v_sum) - 20
+    sum_max = np.max(v_sum) + 20
+    add_stim_shading(ax_sum, stim_times, stim_duration_ms, sum_min, sum_max)
+
+    # Plot the sum trace
+    ax_sum.plot(time_axis_sum, v_sum, color=sum_color, linewidth=0.7, alpha=0.9,
+                label=f'Σ V_m ({total_neurons} neurons)')
+
+    # Styling for sum panel
+    ax_sum.set_xlim(0, min(total_time, time_axis_sum[-1]))
+    ax_sum.set_ylim(sum_min, sum_max)
+
+    ax_sum.set_ylabel(f'Sum\n({total_neurons} neurons)\nmV', color=text_color,
+                      fontsize=10, fontweight='bold')
+    ax_sum.set_xlabel('Time (ms)', color=text_color, fontsize=11)
+
+    # Add info text for sum panel
+    mean_sum = np.mean(v_sum)
+    std_sum = np.std(v_sum)
+    info_text_sum = f'Mean: {mean_sum:.1f} mV | Std: {std_sum:.1f} mV'
+    ax_sum.text(0.99, 0.95, info_text_sum, transform=ax_sum.transAxes,
+                fontsize=9, color=text_color, ha='right', va='top',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor=bg_color,
+                          edgecolor=spine_color, alpha=0.8))
+
+    ax_sum.tick_params(colors=text_color, labelsize=9)
+    for spine in ax_sum.spines.values():
+        spine.set_color(spine_color)
+    ax_sum.grid(True, alpha=grid_alpha, axis='both')
+
+    ax_sum.legend(loc='upper left', fontsize=8, facecolor=bg_color,
+                  edgecolor=spine_color, labelcolor=text_color)
+
+    # Add title
+    fig.suptitle('Membrane Potential Traces', color=text_color,
+                 fontsize=14, fontweight='bold', y=0.98)
+
+    # Add subtitle with neuron counts
+    subtitle = f'Excitatory (red): {len(selected_exc)} neurons  |  Inhibitory (blue): {len(selected_inh)} neurons'
+    fig.text(0.5, 0.95, subtitle, ha='center', va='top',
+             fontsize=10, color=text_color, style='italic')
+
+    plt.tight_layout(rect=[0, 0, 1, 0.94])
+
+    # Save figure
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, bbox_inches='tight', facecolor=fig.get_facecolor())
+        print(f"Saved membrane potential traces to {save_path}")
+
+    selected_neurons = {
+        'excitatory': selected_exc,
+        'inhibitory': selected_inh
+    }
+
+    return fig, selected_neurons
+
+
+def plot_correlation_analysis(network, activity_record, dt=0.1,
+                               time_window_ms=50, distance_bins=20,
+                               figsize=(16, 12), dpi=150,
+                               save_path="correlation_analysis.png", darkstyle=True):
+    """
+    Analyze and visualize activity correlations over time and as a function of distance.
+
+    This function creates a 4-panel figure:
+    1. Top-left: Pairwise correlation over time (sliding window)
+    2. Top-right: Correlation vs inter-neuron distance
+    3. Bottom-left: Correlation distance (characteristic length scale) over time
+    4. Bottom-right: Correlation heatmap over distance and time
+
+    Correlation is computed as the Pearson correlation coefficient between binary
+    spike trains of neuron pairs within sliding time windows.
+
+    Parameters:
+    -----------
+    network : SphericalNeuronalNetworkVectorized or similar
+        The network object containing neuron positions and connectivity
+    activity_record : list
+        List of lists containing active neuron indices at each time step
+    dt : float
+        Time step size in ms
+    time_window_ms : float
+        Size of sliding window for correlation analysis in ms
+    distance_bins : int
+        Number of bins for distance-dependent correlation analysis
+    figsize : tuple
+        Figure size (width, height) in inches
+    dpi : int
+        Figure resolution
+    save_path : str
+        Path to save the figure
+    darkstyle : bool
+        If True, use dark background style
+
+    Returns:
+    --------
+    fig : matplotlib.figure.Figure
+        The figure object
+    correlation_info : dict
+        Dictionary containing correlation analysis results:
+        - mean_correlation: Average pairwise correlation across all time
+        - correlation_over_time: Array of mean correlations at each time window
+        - correlation_vs_distance: Dict with 'distances' and 'correlations' arrays
+        - correlation_length_over_time: Array of characteristic correlation lengths
+        - time_bins: Time bin centers in ms
+    """
+    from matplotlib.gridspec import GridSpec
+    from scipy.stats import pearsonr
+    from scipy.optimize import curve_fit
+
+    print("Computing activity correlation analysis...")
+
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        text_color = 'white'
+        spine_color = 'white'
+        grid_alpha = 0.2
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        spine_color = 'black'
+        grid_alpha = 0.3
+
+    exc_color = '#e74c3c'  # Red for excitatory
+    inh_color = '#3498db'  # Blue for inhibitory
+    total_color = '#9b59b6'  # Purple for total
+
+    n_neurons = network.n_neurons
+    n_timesteps = len(activity_record)
+    duration_ms = n_timesteps * dt
+
+    # Get neuron positions for distance calculations
+    positions = np.array([network.neuron_3d_positions[i] for i in range(n_neurons)])
+
+    # Identify E/I neurons
+    if hasattr(network, 'is_inhibitory') and hasattr(network.is_inhibitory, '__iter__'):
+        is_inhibitory = np.array(network.is_inhibitory)
+    else:
+        is_inhibitory = np.array([network.neurons[i].is_inhibitory for i in range(n_neurons)])
+
+    exc_mask = ~is_inhibitory
+    inh_mask = is_inhibitory
+
+    # Convert activity_record to binary spike matrix
+    print("  Building spike matrix...")
+    spike_matrix = np.zeros((n_neurons, n_timesteps), dtype=np.float32)
+    for t, active_neurons in enumerate(activity_record):
+        for neuron_idx in active_neurons:
+            if neuron_idx < n_neurons:
+                spike_matrix[neuron_idx, t] = 1.0
+
+    # Parameters for analysis
+    window_steps = int(time_window_ms / dt)
+    n_windows = max(1, n_timesteps // window_steps)
+
+    # Subsample neurons for efficiency (correlation computation is O(n²))
+    max_neurons_sample = min(200, n_neurons)
+    if n_neurons > max_neurons_sample:
+        sample_indices = np.random.choice(n_neurons, max_neurons_sample, replace=False)
+        print(f"  Subsampling {max_neurons_sample} neurons for correlation analysis")
+    else:
+        sample_indices = np.arange(n_neurons)
+
+    n_sample = len(sample_indices)
+
+    # Precompute pairwise distances for sampled neurons
+    print("  Computing pairwise distances...")
+    distances = np.zeros((n_sample, n_sample))
+    for i in range(n_sample):
+        for j in range(i + 1, n_sample):
+            dist = np.linalg.norm(positions[sample_indices[i]] - positions[sample_indices[j]])
+            distances[i, j] = dist
+            distances[j, i] = dist
+
+    # Get distance range for binning
+    max_distance = np.max(distances)
+    distance_bin_edges = np.linspace(0, max_distance, distance_bins + 1)
+    distance_bin_centers = (distance_bin_edges[:-1] + distance_bin_edges[1:]) / 2
+
+    # Arrays to store results
+    correlation_over_time = np.zeros(n_windows)
+    correlation_over_time_exc = np.zeros(n_windows)
+    correlation_over_time_inh = np.zeros(n_windows)
+    correlation_length_over_time = np.zeros(n_windows)
+    time_bin_centers = np.zeros(n_windows)
+
+    # Correlation vs distance for each time window (for heatmap)
+    corr_vs_dist_time = np.zeros((n_windows, distance_bins))
+
+    # Overall correlation vs distance (aggregated)
+    corr_by_distance = [[] for _ in range(distance_bins)]
+
+    # Exponential decay function for fitting correlation length
+    def exp_decay(d, c0, lam):
+        return c0 * np.exp(-d / lam)
+
+    print(f"  Analyzing {n_windows} time windows...")
+
+    for w in range(n_windows):
+        start_step = w * window_steps
+        end_step = min(start_step + window_steps, n_timesteps)
+        time_bin_centers[w] = (start_step + end_step) / 2 * dt
+
+        # Extract spike data for this window
+        window_spikes = spike_matrix[sample_indices, start_step:end_step]
+
+        # Skip windows with no activity
+        if np.sum(window_spikes) < 2:
+            correlation_over_time[w] = np.nan
+            correlation_length_over_time[w] = np.nan
+            continue
+
+        # Compute pairwise correlations for this window
+        window_corrs = []
+        window_corrs_exc = []
+        window_corrs_inh = []
+        corrs_by_dist_this_window = [[] for _ in range(distance_bins)]
+
+        for i in range(n_sample):
+            for j in range(i + 1, n_sample):
+                spike_i = window_spikes[i]
+                spike_j = window_spikes[j]
+
+                # Skip if either neuron has no variance
+                if np.std(spike_i) == 0 or np.std(spike_j) == 0:
+                    continue
+
+                # Compute correlation
+                try:
+                    corr, _ = pearsonr(spike_i, spike_j)
+                    if np.isnan(corr):
+                        continue
+                except:
+                    continue
+
+                window_corrs.append(corr)
+
+                # Track E/I specific correlations
+                ni = sample_indices[i]
+                nj = sample_indices[j]
+                if exc_mask[ni] and exc_mask[nj]:
+                    window_corrs_exc.append(corr)
+                elif inh_mask[ni] and inh_mask[nj]:
+                    window_corrs_inh.append(corr)
+
+                # Bin by distance
+                dist = distances[i, j]
+                bin_idx = np.searchsorted(distance_bin_edges[1:], dist)
+                bin_idx = min(bin_idx, distance_bins - 1)
+                corrs_by_dist_this_window[bin_idx].append(corr)
+                corr_by_distance[bin_idx].append(corr)
+
+        # Store mean correlation for this window
+        if window_corrs:
+            correlation_over_time[w] = np.mean(window_corrs)
+        else:
+            correlation_over_time[w] = np.nan
+
+        if window_corrs_exc:
+            correlation_over_time_exc[w] = np.mean(window_corrs_exc)
+        else:
+            correlation_over_time_exc[w] = np.nan
+
+        if window_corrs_inh:
+            correlation_over_time_inh[w] = np.mean(window_corrs_inh)
+        else:
+            correlation_over_time_inh[w] = np.nan
+
+        # Store correlation vs distance for this window
+        for b in range(distance_bins):
+            if corrs_by_dist_this_window[b]:
+                corr_vs_dist_time[w, b] = np.mean(corrs_by_dist_this_window[b])
+            else:
+                corr_vs_dist_time[w, b] = np.nan
+
+        # Fit exponential decay to get correlation length
+        valid_bins = ~np.isnan(corr_vs_dist_time[w, :])
+        if np.sum(valid_bins) >= 3:
+            try:
+                valid_dists = distance_bin_centers[valid_bins]
+                valid_corrs = corr_vs_dist_time[w, valid_bins]
+                # Only fit if correlations are positive and decay-like
+                if valid_corrs[0] > 0 and np.any(valid_corrs > 0.01):
+                    popt, _ = curve_fit(exp_decay, valid_dists, valid_corrs,
+                                        p0=[valid_corrs[0], max_distance / 4],
+                                        bounds=([0, 0.01], [1, max_distance * 2]),
+                                        maxfev=1000)
+                    correlation_length_over_time[w] = popt[1]
+                else:
+                    correlation_length_over_time[w] = np.nan
+            except:
+                correlation_length_over_time[w] = np.nan
+        else:
+            correlation_length_over_time[w] = np.nan
+
+    # Compute overall correlation vs distance
+    corr_vs_distance_mean = np.zeros(distance_bins)
+    corr_vs_distance_std = np.zeros(distance_bins)
+    for b in range(distance_bins):
+        if corr_by_distance[b]:
+            corr_vs_distance_mean[b] = np.mean(corr_by_distance[b])
+            corr_vs_distance_std[b] = np.std(corr_by_distance[b])
+        else:
+            corr_vs_distance_mean[b] = np.nan
+            corr_vs_distance_std[b] = np.nan
+
+    # === Create figure ===
+    print("  Creating figure...")
+    fig = plt.figure(figsize=figsize, dpi=dpi, facecolor=bg_color)
+    gs = GridSpec(2, 2, hspace=0.3, wspace=0.25)
+
+    # === Panel 1: Correlation over time ===
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax1.set_facecolor(bg_color)
+
+    # Plot all, E, and I correlations
+    valid_mask = ~np.isnan(correlation_over_time)
+    ax1.plot(time_bin_centers[valid_mask], correlation_over_time[valid_mask],
+             color=total_color, linewidth=2, label='All pairs', alpha=0.9)
+
+    valid_mask_exc = ~np.isnan(correlation_over_time_exc)
+    if np.any(valid_mask_exc):
+        ax1.plot(time_bin_centers[valid_mask_exc], correlation_over_time_exc[valid_mask_exc],
+                 color=exc_color, linewidth=1.5, label='E-E pairs', alpha=0.8)
+
+    valid_mask_inh = ~np.isnan(correlation_over_time_inh)
+    if np.any(valid_mask_inh):
+        ax1.plot(time_bin_centers[valid_mask_inh], correlation_over_time_inh[valid_mask_inh],
+                 color=inh_color, linewidth=1.5, label='I-I pairs', alpha=0.8)
+
+    ax1.set_xlabel('Time (ms)', color=text_color, fontsize=11)
+    ax1.set_ylabel('Mean Pairwise Correlation', color=text_color, fontsize=11)
+    ax1.set_title('Activity Correlation Over Time', color=text_color, fontsize=12, fontweight='bold')
+    ax1.legend(loc='upper right', fontsize=9, facecolor=bg_color, edgecolor=spine_color, labelcolor=text_color)
+    ax1.axhline(y=0, color=spine_color, linewidth=0.5, linestyle='--', alpha=0.5)
+
+    # Style
+    ax1.tick_params(colors=text_color)
+    for spine in ax1.spines.values():
+        spine.set_color(spine_color)
+    ax1.grid(True, alpha=grid_alpha)
+
+    # Add mean correlation text
+    mean_corr = np.nanmean(correlation_over_time)
+    ax1.text(0.02, 0.98, f'Mean: {mean_corr:.3f}', transform=ax1.transAxes,
+             fontsize=10, color=text_color, ha='left', va='top',
+             bbox=dict(boxstyle='round,pad=0.3', facecolor=bg_color, edgecolor=spine_color, alpha=0.8))
+
+    # === Panel 2: Correlation vs distance ===
+    ax2 = fig.add_subplot(gs[0, 1])
+    ax2.set_facecolor(bg_color)
+
+    valid_dist_mask = ~np.isnan(corr_vs_distance_mean)
+    ax2.errorbar(distance_bin_centers[valid_dist_mask], corr_vs_distance_mean[valid_dist_mask],
+                 yerr=corr_vs_distance_std[valid_dist_mask], color=total_color,
+                 linewidth=2, marker='o', markersize=5, capsize=3, label='Mean ± std')
+
+    # Fit exponential decay
+    if np.sum(valid_dist_mask) >= 3:
+        try:
+            valid_dists = distance_bin_centers[valid_dist_mask]
+            valid_corrs = corr_vs_distance_mean[valid_dist_mask]
+            if valid_corrs[0] > 0:
+                popt, _ = curve_fit(exp_decay, valid_dists, valid_corrs,
+                                    p0=[valid_corrs[0], max_distance / 4],
+                                    bounds=([0, 0.01], [1, max_distance * 2]),
+                                    maxfev=1000)
+                fit_x = np.linspace(0, max_distance, 100)
+                fit_y = exp_decay(fit_x, *popt)
+                ax2.plot(fit_x, fit_y, color='#2ecc71', linewidth=2, linestyle='--',
+                         label=f'Exp fit (λ={popt[1]:.2f})')
+        except:
+            pass
+
+    ax2.set_xlabel('Inter-neuron Distance', color=text_color, fontsize=11)
+    ax2.set_ylabel('Mean Correlation', color=text_color, fontsize=11)
+    ax2.set_title('Correlation vs Distance', color=text_color, fontsize=12, fontweight='bold')
+    ax2.legend(loc='upper right', fontsize=9, facecolor=bg_color, edgecolor=spine_color, labelcolor=text_color)
+    ax2.axhline(y=0, color=spine_color, linewidth=0.5, linestyle='--', alpha=0.5)
+
+    # Style
+    ax2.tick_params(colors=text_color)
+    for spine in ax2.spines.values():
+        spine.set_color(spine_color)
+    ax2.grid(True, alpha=grid_alpha)
+
+    # === Panel 3: Correlation length over time ===
+    ax3 = fig.add_subplot(gs[1, 0])
+    ax3.set_facecolor(bg_color)
+
+    valid_length_mask = ~np.isnan(correlation_length_over_time)
+    if np.any(valid_length_mask):
+        ax3.plot(time_bin_centers[valid_length_mask], correlation_length_over_time[valid_length_mask],
+                 color='#f39c12', linewidth=2, marker='o', markersize=4)
+
+        mean_length = np.nanmean(correlation_length_over_time)
+        ax3.axhline(y=mean_length, color='#e67e22', linewidth=1.5, linestyle='--',
+                    label=f'Mean: {mean_length:.2f}')
+
+    ax3.set_xlabel('Time (ms)', color=text_color, fontsize=11)
+    ax3.set_ylabel('Correlation Length (λ)', color=text_color, fontsize=11)
+    ax3.set_title('Correlation Length Over Time', color=text_color, fontsize=12, fontweight='bold')
+    ax3.legend(loc='upper right', fontsize=9, facecolor=bg_color, edgecolor=spine_color, labelcolor=text_color)
+
+    # Style
+    ax3.tick_params(colors=text_color)
+    for spine in ax3.spines.values():
+        spine.set_color(spine_color)
+    ax3.grid(True, alpha=grid_alpha)
+
+    # Add explanation text
+    ax3.text(0.02, 0.02, 'λ = characteristic distance\nover which correlation decays',
+             transform=ax3.transAxes, fontsize=8, color=text_color, ha='left', va='bottom',
+             style='italic', alpha=0.7)
+
+    # === Panel 4: Correlation heatmap (distance x time) ===
+    ax4 = fig.add_subplot(gs[1, 1])
+    ax4.set_facecolor(bg_color)
+
+    # Create heatmap
+    # Replace NaN with 0 for visualization
+    heatmap_data = np.nan_to_num(corr_vs_dist_time.T, nan=0)
+
+    # Use diverging colormap centered at 0
+    vmax = max(abs(np.nanmin(corr_vs_dist_time)), abs(np.nanmax(corr_vs_dist_time)))
+    vmax = max(vmax, 0.1)  # Ensure some range
+
+    im = ax4.imshow(heatmap_data, aspect='auto', origin='lower',
+                    extent=[0, duration_ms, 0, max_distance],
+                    cmap='RdBu_r', vmin=-vmax, vmax=vmax)
+
+    cbar = plt.colorbar(im, ax=ax4, pad=0.02)
+    cbar.set_label('Correlation', color=text_color, fontsize=10)
+    cbar.ax.tick_params(colors=text_color)
+
+    ax4.set_xlabel('Time (ms)', color=text_color, fontsize=11)
+    ax4.set_ylabel('Distance', color=text_color, fontsize=11)
+    ax4.set_title('Correlation by Distance Over Time', color=text_color, fontsize=12, fontweight='bold')
+
+    # Style
+    ax4.tick_params(colors=text_color)
+    for spine in ax4.spines.values():
+        spine.set_color(spine_color)
+
+    # Main title
+    fig.suptitle('Spatial Correlation Analysis', color=text_color,
+                 fontsize=14, fontweight='bold', y=0.98)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+    # Save figure
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, bbox_inches='tight', facecolor=fig.get_facecolor())
+        print(f"Saved correlation analysis to {save_path}")
+
+    # Compile results
+    correlation_info = {
+        'mean_correlation': float(np.nanmean(correlation_over_time)),
+        'mean_correlation_exc': float(np.nanmean(correlation_over_time_exc)),
+        'mean_correlation_inh': float(np.nanmean(correlation_over_time_inh)),
+        'correlation_over_time': correlation_over_time.tolist(),
+        'correlation_over_time_exc': correlation_over_time_exc.tolist(),
+        'correlation_over_time_inh': correlation_over_time_inh.tolist(),
+        'time_bins_ms': time_bin_centers.tolist(),
+        'correlation_vs_distance_mean': corr_vs_distance_mean.tolist(),
+        'correlation_vs_distance_std': corr_vs_distance_std.tolist(),
+        'distance_bin_centers': distance_bin_centers.tolist(),
+        'correlation_length_over_time': correlation_length_over_time.tolist(),
+        'mean_correlation_length': float(np.nanmean(correlation_length_over_time)),
+        'time_window_ms': time_window_ms,
+        'n_neurons_sampled': n_sample
+    }
+
+    print(f"  Mean correlation: {correlation_info['mean_correlation']:.4f}")
+    print(f"  Mean correlation length: {correlation_info['mean_correlation_length']:.2f}")
+
+    return fig, correlation_info
+
+
+def plot_stim_vs_unstim_correlation(network, activity_record, stim_times, stim_duration_ms,
+                                     dt=0.1, buffer_ms=5.0, distance_bins=15,
+                                     max_neurons_sample=200, figsize=(16, 10), dpi=150,
+                                     save_path="correlation_comparison.png", darkstyle=True):
+    """
+    Compare spatial correlation structure between stimulated and unstimulated periods.
+
+    This provides an alternative to avalanche-based criticality analysis that works
+    better during driven activity. At criticality, correlation length diverges
+    (long-range correlations). Sub-critical systems have short correlation lengths.
+
+    Creates a 4-panel figure:
+    1. Top-left: Correlation vs distance for unstimulated periods
+    2. Top-right: Correlation vs distance for stimulated periods
+    3. Bottom-left: Correlation length over time (both periods overlaid)
+    4. Bottom-right: Direct comparison scatter plot
+
+    Parameters:
+    -----------
+    network : SphericalNeuronalNetworkVectorized or similar
+        The network object containing neuron positions
+    activity_record : list
+        List of lists containing active neuron indices at each time step
+    stim_times : list
+        List of stimulation onset times in ms
+    stim_duration_ms : float
+        Duration of each stimulation period in ms
+    dt : float
+        Time step size in ms
+    buffer_ms : float
+        Buffer time before and after stimulation window
+    distance_bins : int
+        Number of bins for distance-dependent correlation
+    max_neurons_sample : int
+        Maximum number of neurons to sample for correlation analysis.
+        Higher values give better statistics but O(n²) computational cost.
+    figsize : tuple
+        Figure size (width, height) in inches
+    dpi : int
+        Figure resolution
+    save_path : str
+        Path to save the figure
+    darkstyle : bool
+        If True, use dark background style
+
+    Returns:
+    --------
+    fig : matplotlib.figure.Figure
+        The figure object
+    comparison_info : dict
+        Dictionary containing comparison results
+    """
+    from matplotlib.gridspec import GridSpec
+    from scipy.stats import pearsonr
+    from scipy.optimize import curve_fit
+
+    print("Computing stimulated vs unstimulated correlation comparison...")
+
+    # Set colors based on style
+    if darkstyle:
+        bg_color = '#1a1a1a'
+        text_color = 'white'
+        spine_color = 'white'
+        grid_alpha = 0.2
+    else:
+        bg_color = 'white'
+        text_color = 'black'
+        spine_color = 'black'
+        grid_alpha = 0.3
+
+    unstim_color = '#3498db'  # Blue for unstimulated
+    stim_color = '#e74c3c'    # Red for stimulated
+
+    n_neurons = network.n_neurons
+    n_timesteps = len(activity_record)
+    duration_ms = n_timesteps * dt
+
+    # Validate inputs
+    if not stim_times or stim_duration_ms is None or stim_duration_ms <= 0:
+        print("  ERROR: No valid stimulation times or duration provided. Cannot compare stim vs unstim.")
+        return None, {}
+
+    # Build mask for stimulated periods (including buffer)
+    stim_mask = np.zeros(n_timesteps, dtype=bool)
+    for stim_time in stim_times:
+        start_ms = stim_time - buffer_ms
+        end_ms = stim_time + stim_duration_ms + buffer_ms
+        start_step = max(0, int(start_ms / dt))
+        end_step = min(n_timesteps, int(end_ms / dt))
+        stim_mask[start_step:end_step] = True
+
+    unstim_mask = ~stim_mask
+
+    print(f"  Total simulation: {duration_ms:.1f} ms ({n_timesteps} steps)")
+    print(f"  Stimulated steps: {np.sum(stim_mask)} ({100*np.sum(stim_mask)/n_timesteps:.1f}%)")
+    print(f"  Unstimulated steps: {np.sum(unstim_mask)} ({100*np.sum(unstim_mask)/n_timesteps:.1f}%)")
+
+    # Get neuron positions for distance calculations
+    positions = np.array([network.neuron_3d_positions[i] for i in range(n_neurons)])
+
+    # Convert activity_record to binary spike matrix
+    print("  Building spike matrix...")
+    spike_matrix = np.zeros((n_neurons, n_timesteps), dtype=np.float32)
+    for t, active_neurons in enumerate(activity_record):
+        for neuron_idx in active_neurons:
+            if neuron_idx < n_neurons:
+                spike_matrix[neuron_idx, t] = 1.0
+
+    # Find neurons active in BOTH stim and unstim periods (for fair comparison)
+    # First compute spikes per neuron in each period
+    stim_spikes = spike_matrix[:, stim_mask].sum(axis=1)
+    unstim_spikes = spike_matrix[:, unstim_mask].sum(axis=1)
+
+    # Neurons must have at least 1 spike in BOTH periods
+    active_in_both = (stim_spikes > 0) & (unstim_spikes > 0)
+    active_neuron_indices = np.where(active_in_both)[0]
+    n_active = len(active_neuron_indices)
+
+    # Also count neurons active in only one period for reporting
+    n_stim_only = np.sum((stim_spikes > 0) & (unstim_spikes == 0))
+    n_unstim_only = np.sum((stim_spikes == 0) & (unstim_spikes > 0))
+    n_either = np.sum((stim_spikes > 0) | (unstim_spikes > 0))
+
+    print(f"  {n_either} neurons fired at least once (out of {n_neurons} total)")
+    print(f"  {n_active} neurons active in BOTH periods (used for analysis)")
+    print(f"  {n_stim_only} neurons active only during stim, {n_unstim_only} only during unstim")
+
+    if n_active < 10:
+        print("  ERROR: Too few neurons active in both periods for correlation analysis")
+        return None, {}
+
+    # Subsample from neurons active in both periods
+    actual_sample_size = min(max_neurons_sample, n_active)
+    if n_active > actual_sample_size:
+        sample_indices = np.random.choice(active_neuron_indices, actual_sample_size, replace=False)
+        print(f"  Subsampling {actual_sample_size} neurons for correlation analysis")
+    else:
+        sample_indices = active_neuron_indices
+        print(f"  Using all {n_active} neurons active in both periods")
+
+    n_sample = len(sample_indices)
+
+    # Precompute pairwise distances
+    print("  Computing pairwise distances...")
+    distances = np.zeros((n_sample, n_sample))
+    for i in range(n_sample):
+        for j in range(i + 1, n_sample):
+            dist = np.linalg.norm(positions[sample_indices[i]] - positions[sample_indices[j]])
+            distances[i, j] = dist
+            distances[j, i] = dist
+
+    max_distance = np.max(distances)
+    distance_bin_edges = np.linspace(0, max_distance, distance_bins + 1)
+    distance_bin_centers = (distance_bin_edges[:-1] + distance_bin_edges[1:]) / 2
+
+    # Exponential decay function
+    def exp_decay(d, c0, lam):
+        return c0 * np.exp(-d / lam)
+
+    def compute_correlation_by_distance(mask, label):
+        """Compute correlation vs distance for timesteps where mask is True."""
+        mask_indices = np.where(mask)[0]
+        if len(mask_indices) < 100:
+            print(f"    {label}: insufficient data ({len(mask_indices)} steps)")
+            return None, None, None, None
+
+        # Get spike data for this period
+        period_spikes = spike_matrix[np.ix_(sample_indices, mask_indices)]
+
+        print(f"    {label}: computing correlations for {len(mask_indices)} steps...")
+
+        # Vectorized correlation computation using numpy
+        # Normalize each neuron's spike train (subtract mean, divide by std)
+        means = period_spikes.mean(axis=1, keepdims=True)
+        stds = period_spikes.std(axis=1, keepdims=True)
+
+        # Find neurons with non-zero variance
+        valid_neurons = (stds.flatten() > 0)
+        n_valid = np.sum(valid_neurons)
+
+        if n_valid < 2:
+            print(f"    {label}: insufficient variance ({n_valid} neurons with activity)")
+            return None, None, None, None
+
+        # Normalize only valid neurons
+        valid_indices = np.where(valid_neurons)[0]
+        normalized = np.zeros_like(period_spikes)
+        normalized[valid_neurons] = (period_spikes[valid_neurons] - means[valid_neurons]) / stds[valid_neurons]
+
+        # Compute correlation matrix using matrix multiplication (much faster than pairwise pearsonr)
+        n_timepoints = period_spikes.shape[1]
+        corr_matrix = np.dot(normalized, normalized.T) / n_timepoints
+
+        # Bin correlations by distance
+        corr_by_distance = [[] for _ in range(distance_bins)]
+
+        for i in range(n_sample):
+            if not valid_neurons[i]:
+                continue
+            for j in range(i + 1, n_sample):
+                if not valid_neurons[j]:
+                    continue
+
+                corr = corr_matrix[i, j]
+                if np.isnan(corr):
+                    continue
+
+                dist = distances[i, j]
+                bin_idx = np.searchsorted(distance_bin_edges[1:], dist)
+                bin_idx = min(bin_idx, distance_bins - 1)
+                corr_by_distance[bin_idx].append(corr)
+
+        # Compute mean and std for each distance bin
+        corr_mean = np.zeros(distance_bins)
+        corr_std = np.zeros(distance_bins)
+        for b in range(distance_bins):
+            if corr_by_distance[b]:
+                corr_mean[b] = np.mean(corr_by_distance[b])
+                corr_std[b] = np.std(corr_by_distance[b])
+            else:
+                corr_mean[b] = np.nan
+                corr_std[b] = np.nan
+
+        # Fit exponential decay to get correlation length
+        corr_length = None
+        valid_mask = ~np.isnan(corr_mean)
+        if np.sum(valid_mask) >= 3:
+            try:
+                valid_dists = distance_bin_centers[valid_mask]
+                valid_corrs = corr_mean[valid_mask]
+                if valid_corrs[0] > 0.001:
+                    popt, _ = curve_fit(exp_decay, valid_dists, valid_corrs,
+                                        p0=[valid_corrs[0], max_distance / 4],
+                                        bounds=([0, 0.01], [1, max_distance * 2]),
+                                        maxfev=1000)
+                    corr_length = popt[1]
+            except:
+                pass
+
+        return corr_mean, corr_std, corr_length, corr_by_distance
+
+    # Compute for both periods
+    unstim_mean, unstim_std, unstim_length, unstim_raw = compute_correlation_by_distance(unstim_mask, "Unstimulated")
+    stim_mean, stim_std, stim_length, stim_raw = compute_correlation_by_distance(stim_mask, "Stimulated")
+
+    # Now compute correlation length over time for both periods
+    print("  Computing correlation length over time...")
+    time_window_ms = 50
+    window_steps = int(time_window_ms / dt)
+    n_windows = max(1, n_timesteps // window_steps)
+
+    unstim_length_time = []
+    stim_length_time = []
+    time_centers = []
+
+    for w in range(n_windows):
+        start_step = w * window_steps
+        end_step = min(start_step + window_steps, n_timesteps)
+        time_centers.append((start_step + end_step) / 2 * dt)
+
+        # Determine if this window is predominantly stim or unstim
+        window_stim_frac = np.mean(stim_mask[start_step:end_step])
+
+        # Get spikes for this window
+        window_spikes = spike_matrix[sample_indices, start_step:end_step]
+
+        # Vectorized correlation computation for this window
+        means_w = window_spikes.mean(axis=1, keepdims=True)
+        stds_w = window_spikes.std(axis=1, keepdims=True)
+        valid_neurons_w = (stds_w.flatten() > 0)
+
+        if np.sum(valid_neurons_w) < 2:
+            # Not enough neurons with variance
+            if window_stim_frac > 0.5:
+                stim_length_time.append((time_centers[-1], np.nan))
+            else:
+                unstim_length_time.append((time_centers[-1], np.nan))
+            continue
+
+        normalized_w = np.zeros_like(window_spikes)
+        normalized_w[valid_neurons_w] = (window_spikes[valid_neurons_w] - means_w[valid_neurons_w]) / stds_w[valid_neurons_w]
+
+        n_tp = window_spikes.shape[1]
+        corr_matrix_w = np.dot(normalized_w, normalized_w.T) / n_tp
+
+        # Bin correlations by distance
+        corrs_by_dist = [[] for _ in range(distance_bins)]
+        for i in range(n_sample):
+            if not valid_neurons_w[i]:
+                continue
+            for j in range(i + 1, n_sample):
+                if not valid_neurons_w[j]:
+                    continue
+                corr = corr_matrix_w[i, j]
+                if not np.isnan(corr):
+                    dist = distances[i, j]
+                    bin_idx = min(np.searchsorted(distance_bin_edges[1:], dist), distance_bins - 1)
+                    corrs_by_dist[bin_idx].append(corr)
+
+        # Fit to get correlation length
+        corr_mean_window = np.array([np.mean(c) if c else np.nan for c in corrs_by_dist])
+        valid = ~np.isnan(corr_mean_window)
+
+        length = np.nan
+        if np.sum(valid) >= 3:
+            try:
+                valid_dists = distance_bin_centers[valid]
+                valid_corrs = corr_mean_window[valid]
+                if valid_corrs[0] > 0.001:
+                    popt, _ = curve_fit(exp_decay, valid_dists, valid_corrs,
+                                        p0=[valid_corrs[0], max_distance / 4],
+                                        bounds=([0, 0.01], [1, max_distance * 2]),
+                                        maxfev=500)
+                    length = popt[1]
+            except:
+                pass
+
+        # Assign to appropriate list based on stim fraction
+        if window_stim_frac > 0.5:
+            stim_length_time.append((time_centers[-1], length))
+        else:
+            unstim_length_time.append((time_centers[-1], length))
+
+    # === Compute overall mean correlations for summary ===
+    # Flatten all correlations for each regime
+    unstim_all_corrs = []
+    stim_all_corrs = []
+    if unstim_raw:
+        for bin_corrs in unstim_raw:
+            unstim_all_corrs.extend(bin_corrs)
+    if stim_raw:
+        for bin_corrs in stim_raw:
+            stim_all_corrs.extend(bin_corrs)
+
+    unstim_overall_mean = np.mean(unstim_all_corrs) if unstim_all_corrs else 0
+    stim_overall_mean = np.mean(stim_all_corrs) if stim_all_corrs else 0
+
+    # === Create figure ===
+    print("  Creating figure...")
+    fig = plt.figure(figsize=figsize, dpi=dpi, facecolor=bg_color)
+    gs = GridSpec(2, 2, hspace=0.35, wspace=0.3)
+
+    # === Panel 1: Bar chart comparing correlation length λ ===
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax1.set_facecolor(bg_color)
+
+    bar_positions = [0, 1]
+    bar_values = [unstim_length if unstim_length else 0, stim_length if stim_length else 0]
+    bar_colors = [unstim_color, stim_color]
+    bar_labels = ['Unstimulated', 'Stimulated']
+
+    bars = ax1.bar(bar_positions, bar_values, color=bar_colors, width=0.6, edgecolor='white', linewidth=1.5)
+
+    # Add value labels on bars
+    for bar, val in zip(bars, bar_values):
+        height = bar.get_height()
+        label_text = f'λ={val:.2f}' if val > 0 else 'N/A'
+        ax1.text(bar.get_x() + bar.get_width()/2., height + 0.02,
+                 label_text, ha='center', va='bottom', color=text_color, fontsize=12, fontweight='bold')
+
+    ax1.set_xticks(bar_positions)
+    ax1.set_xticklabels(bar_labels, color=text_color, fontsize=11)
+    ax1.set_ylabel('Correlation Length (λ)', color=text_color, fontsize=11)
+    ax1.set_title('Correlation Length Comparison', color=text_color, fontsize=12, fontweight='bold')
+    ax1.tick_params(colors=text_color)
+    for spine in ax1.spines.values():
+        spine.set_color(spine_color)
+    ax1.grid(True, alpha=grid_alpha, axis='y')
+
+    # Add interpretation text
+    if unstim_length and stim_length:
+        ratio = stim_length / unstim_length
+        if ratio < 0.5:
+            interp = "Stimulation disrupts long-range correlations"
+        elif ratio > 2:
+            interp = "Stimulation enhances long-range correlations"
+        else:
+            interp = "Similar correlation structure"
+        ax1.text(0.5, 0.95, interp, transform=ax1.transAxes,
+                 ha='center', va='top', color='#f39c12', fontsize=10, fontweight='bold')
+
+    # === Panel 2: Correlation vs distance (both overlaid) ===
+    ax2 = fig.add_subplot(gs[0, 1])
+    ax2.set_facecolor(bg_color)
+
+    if unstim_mean is not None:
+        valid = ~np.isnan(unstim_mean)
+        unstim_label = f'Unstimulated (λ={unstim_length:.2f})' if unstim_length else 'Unstimulated'
+        ax2.errorbar(distance_bin_centers[valid], unstim_mean[valid],
+                     yerr=unstim_std[valid], color=unstim_color,
+                     linewidth=2, marker='o', markersize=6, capsize=3,
+                     label=unstim_label)
+        # Plot exponential fit
+        if unstim_length:
+            fit_x = np.linspace(0, max_distance, 100)
+            fit_y = unstim_mean[valid][0] * np.exp(-fit_x / unstim_length)
+            ax2.plot(fit_x, fit_y, '--', color=unstim_color, alpha=0.5, linewidth=1.5)
+
+    if stim_mean is not None:
+        valid = ~np.isnan(stim_mean)
+        stim_label = f'Stimulated (λ={stim_length:.2f})' if stim_length else 'Stimulated'
+        ax2.errorbar(distance_bin_centers[valid], stim_mean[valid],
+                     yerr=stim_std[valid], color=stim_color,
+                     linewidth=2, marker='s', markersize=6, capsize=3,
+                     label=stim_label)
+        # Plot exponential fit
+        if stim_length:
+            fit_x = np.linspace(0, max_distance, 100)
+            fit_y = stim_mean[valid][0] * np.exp(-fit_x / stim_length)
+            ax2.plot(fit_x, fit_y, '--', color=stim_color, alpha=0.5, linewidth=1.5)
+
+    ax2.set_xlabel('Inter-neuron Distance', color=text_color, fontsize=11)
+    ax2.set_ylabel('Correlation', color=text_color, fontsize=11)
+    ax2.set_title('Correlation vs Distance', color=text_color, fontsize=12, fontweight='bold')
+    ax2.axhline(y=0, color=spine_color, linewidth=0.5, linestyle='--', alpha=0.5)
+    ax2.legend(loc='upper right', fontsize=9, facecolor=bg_color, edgecolor=spine_color, labelcolor=text_color)
+    ax2.tick_params(colors=text_color)
+    for spine in ax2.spines.values():
+        spine.set_color(spine_color)
+    ax2.grid(True, alpha=grid_alpha)
+
+    # === Panel 3: Correlation length λ over time ===
+    ax3 = fig.add_subplot(gs[1, 0])
+    ax3.set_facecolor(bg_color)
+
+    # Use the already-computed length over time data
+    if unstim_length_time:
+        times, lengths = zip(*unstim_length_time)
+        valid = [i for i, l in enumerate(lengths) if not np.isnan(l)]
+        if valid:
+            valid_times = [times[i] for i in valid]
+            valid_lengths = [lengths[i] for i in valid]
+            ax3.scatter(valid_times, valid_lengths, color=unstim_color, s=30, alpha=0.7, label='Unstimulated')
+            mean_len = np.mean(valid_lengths)
+            ax3.axhline(y=mean_len, color=unstim_color, linewidth=2, linestyle='--', alpha=0.7)
+
+    if stim_length_time:
+        times, lengths = zip(*stim_length_time)
+        valid = [i for i, l in enumerate(lengths) if not np.isnan(l)]
+        if valid:
+            valid_times = [times[i] for i in valid]
+            valid_lengths = [lengths[i] for i in valid]
+            ax3.scatter(valid_times, valid_lengths, color=stim_color, s=30, alpha=0.7, label='Stimulated')
+            mean_len = np.mean(valid_lengths)
+            ax3.axhline(y=mean_len, color=stim_color, linewidth=2, linestyle='--', alpha=0.7)
+
+    ax3.set_xlabel('Time (ms)', color=text_color, fontsize=11)
+    ax3.set_ylabel('Correlation Length (λ)', color=text_color, fontsize=11)
+    ax3.set_title('Correlation Length Over Time', color=text_color, fontsize=12, fontweight='bold')
+    ax3.legend(loc='upper right', fontsize=9, facecolor=bg_color, edgecolor=spine_color, labelcolor=text_color)
+    ax3.tick_params(colors=text_color)
+    for spine in ax3.spines.values():
+        spine.set_color(spine_color)
+    ax3.grid(True, alpha=grid_alpha)
+
+    # === Panel 4: Histogram of pairwise correlations ===
+    ax4 = fig.add_subplot(gs[1, 1])
+    ax4.set_facecolor(bg_color)
+
+    # Create histograms
+    bins = np.linspace(-0.2, 0.4, 31)
+
+    if unstim_all_corrs:
+        ax4.hist(unstim_all_corrs, bins=bins, color=unstim_color, alpha=0.6,
+                 label=f'Unstimulated (n={len(unstim_all_corrs)})', edgecolor='white', linewidth=0.5)
+
+    if stim_all_corrs:
+        ax4.hist(stim_all_corrs, bins=bins, color=stim_color, alpha=0.6,
+                 label=f'Stimulated (n={len(stim_all_corrs)})', edgecolor='white', linewidth=0.5)
+
+    # Add vertical lines for means
+    if unstim_all_corrs:
+        ax4.axvline(x=unstim_overall_mean, color=unstim_color, linewidth=2, linestyle='--')
+    if stim_all_corrs:
+        ax4.axvline(x=stim_overall_mean, color=stim_color, linewidth=2, linestyle='--')
+
+    ax4.axvline(x=0, color=spine_color, linewidth=1, linestyle='-', alpha=0.5)
+
+    ax4.set_xlabel('Pairwise Correlation', color=text_color, fontsize=11)
+    ax4.set_ylabel('Count', color=text_color, fontsize=11)
+    ax4.set_title('Distribution of Pairwise Correlations', color=text_color, fontsize=12, fontweight='bold')
+    ax4.legend(loc='upper right', fontsize=9, facecolor=bg_color, edgecolor=spine_color, labelcolor=text_color)
+    ax4.tick_params(colors=text_color)
+    for spine in ax4.spines.values():
+        spine.set_color(spine_color)
+    ax4.grid(True, alpha=grid_alpha)
+
+    # Main title
+    fig.suptitle('Correlation Analysis: Unstimulated vs Stimulated Periods',
+                 color=text_color, fontsize=14, fontweight='bold', y=0.98)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+    # Save
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, bbox_inches='tight', facecolor=fig.get_facecolor())
+        print(f"Saved correlation comparison to {save_path}")
+
+    # Compile results
+    comparison_info = {
+        'unstimulated': {
+            'correlation_length': float(unstim_length) if unstim_length else None,
+            'correlation_vs_distance_mean': unstim_mean.tolist() if unstim_mean is not None else None,
+            'correlation_vs_distance_std': unstim_std.tolist() if unstim_std is not None else None,
+        },
+        'stimulated': {
+            'correlation_length': float(stim_length) if stim_length else None,
+            'correlation_vs_distance_mean': stim_mean.tolist() if stim_mean is not None else None,
+            'correlation_vs_distance_std': stim_std.tolist() if stim_std is not None else None,
+        },
+        'distance_bin_centers': distance_bin_centers.tolist(),
+        'length_ratio': float(stim_length / unstim_length) if (stim_length and unstim_length) else None,
+    }
+
+    print(f"  Unstimulated correlation length: {unstim_length:.2f}" if unstim_length else "  Unstimulated correlation length: N/A")
+    print(f"  Stimulated correlation length: {stim_length:.2f}" if stim_length else "  Stimulated correlation length: N/A")
+    if comparison_info['length_ratio']:
+        print(f"  Ratio (stim/unstim): {comparison_info['length_ratio']:.2f}")
+
+    return fig, comparison_info

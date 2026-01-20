@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "timestamp": "2026-01-19T00:38:24.164921",
+    "timestamp": "2026-01-19T00:55:15.061393",
     "description": "3D Spherical network experiment configuration"
   },
   "experiment_parameters": {
@@ -9,7 +9,7 @@
     "connection_probabilities": {
       "ee": 0.1,
       "ei": 0.15,
-      "ie": 0.35,
+      "ie": 0.25,
       "ii": 0.15
     },
     "weight_scale": 0.3,
@@ -19,7 +19,7 @@
     "stim_interval_strength": 10,
     "stim_fraction": 0.2,
     "transmission_delay": 1,
-    "inhibitory_fraction": 0.2,
+    "inhibitory_fraction": 0.195,
     "stochastic_stim": false,
     "layout": "sphere",
     "no_stimulation": false,
@@ -57,9 +57,9 @@
     "i_noise_amp": 0.003,
     "e_reversal": 0.0,
     "i_reversal": -80.0,
-    "attempted_connections": 5411279,
-    "nonzero_connections": 3599296,
-    "connection_density": 0.09999711062954937
+    "attempted_connections": 4807570,
+    "nonzero_connections": 3017699,
+    "connection_density": 0.08383894537978552
   },
   "neuron_parameters": {
     "excitatory_neuron": {
@@ -99,8 +99,8 @@
   },
   "network_composition": {
     "total_neurons": 6000,
-    "excitatory_neurons": 4791,
-    "inhibitory_neurons": 1209,
-    "inhibitory_fraction_actual": 0.2015
+    "excitatory_neurons": 4817,
+    "inhibitory_neurons": 1183,
+    "inhibitory_fraction_actual": 0.19716666666666666
   }
 }

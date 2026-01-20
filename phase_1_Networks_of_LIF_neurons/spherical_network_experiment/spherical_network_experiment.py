@@ -1460,11 +1460,11 @@ def run_biologically_plausible_simulation(random_seed=42):
         connection_probabilities={  # Biological connection probabilities
             'ee': 0.10,   # E→E: ~10% (local recurrent excitation)
             'ei': 0.15,   # E→I: ~15-20% (feedforward to interneurons)
-            'ie': 0.35,   # I→E: ~40-50% (strong blanket inhibition)
+            'ie': 0.25,   # I→E: ~40-50% (strong blanket inhibition)
             'ii': 0.15,   # I→I: ~10-20% (interneuron networks)
         },
         weight_scale=0.3,
-        inhibitory_fraction=0.20,
+        inhibitory_fraction=0.195,
         transmission_delay=1,
         distance_lambda=0.15, # Distance decay for all connection types (except I→E)
         lambda_decay_ie=0.08,  # Slower decay for I→E connections (longer range inhibition)

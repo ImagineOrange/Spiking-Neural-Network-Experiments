@@ -1,0 +1,201 @@
+{
+  "metadata": {
+    "timestamp": "2026-01-19T23:02:26.618284",
+    "description": "Analysis results from vectorized spherical network simulation"
+  },
+  "simulation_performance": {
+    "total_spikes": {
+      "value": 3547606,
+      "summary": "Total number of spikes (action potentials) recorded across all neurons during the entire simulation."
+    },
+    "avg_spikes_per_step": {
+      "value": 141.90424,
+      "summary": "Average number of neurons firing at each simulation timestep. Higher values indicate more synchronous or active networks."
+    },
+    "simulation_time_seconds": {
+      "value": 84.15070080757141,
+      "summary": "Wall-clock time in seconds to run the simulation."
+    },
+    "realtime_factor": {
+      "value": 29.708605822746325,
+      "summary": "How many times faster than real-time the simulation ran. A value of 100x means 1 second of biological time was simulated in 0.01 seconds."
+    }
+  },
+  "network_activation": {
+    "mean_activation_percent": {
+      "value": 2.365070666666666,
+      "summary": "Average percentage of the network that was active (spiking) at any given moment. Low values (~1-5%) indicate sparse coding; high values (>20%) suggest excessive synchrony or runaway excitation."
+    },
+    "max_activation_percent": {
+      "value": 4.766666666666667,
+      "summary": "Peak percentage of neurons firing simultaneously. Values approaching 100% indicate network-wide synchronization events."
+    },
+    "std_activation_percent": {
+      "value": 0.8522318330292785,
+      "summary": "Standard deviation of activation percentage. High variability suggests bursty/oscillatory dynamics; low variability indicates steady-state activity."
+    }
+  },
+  "criticality_analysis": {
+    "avalanche_count": {
+      "value": 87,
+      "summary": "Number of avalanches detected. An avalanche is a cascade of neural activity triggered by initial firing and propagating through the network until activity dies out."
+    },
+    "size_duration_scaling_exponent": {
+      "value": null,
+      "summary": "The \u03c3 exponent relating avalanche size to duration (Size ~ Duration^\u03c3). Critical systems show \u03c3 \u2248 1.5. Values < 1.5 suggest subcritical dynamics; values > 1.5 suggest supercritical dynamics."
+    },
+    "size_duration_r_squared": {
+      "value": 0.9839491224762228,
+      "summary": "R\u00b2 goodness-of-fit for the size-duration scaling relationship. Values close to 1.0 indicate the power-law relationship is a good fit to the data."
+    },
+    "branching_ratio": {
+      "value": 1.0026919248482205,
+      "summary": "Average number of neurons activated by each previously active neuron. Branching ratio = 1.0 indicates criticality (balanced propagation). <1.0 is subcritical (activity dies out); >1.0 is supercritical (activity explodes)."
+    },
+    "criticality_assessment": {
+      "value": "Strongly critical",
+      "summary": "Overall assessment of whether the network operates near the critical point, based on branching ratio and scaling exponents."
+    }
+  },
+  "oscillation_frequency_analysis": {
+    "peak_frequency_hz": {
+      "value": 0.4,
+      "summary": "Dominant oscillation frequency in Hz from FFT analysis of total network activity. Common brain rhythms: Delta (1-4Hz), Theta (4-8Hz), Alpha (8-13Hz), Beta (13-30Hz), Gamma (30-100Hz)."
+    },
+    "dominant_band": {
+      "value": "Delta",
+      "summary": "The frequency band containing the most power. Different bands are associated with different cognitive states and network dynamics."
+    },
+    "gamma_fraction": {
+      "value": 0.015311114433750585,
+      "summary": "Fraction of total spectral power in the gamma band (30-100Hz). High values indicate gamma-band oscillations, often associated with attention and binding in biological networks."
+    },
+    "is_gamma_oscillation": {
+      "value": false,
+      "summary": "Whether the network exhibits gamma-band oscillations (30-100Hz). True if peak frequency is in gamma range or gamma power exceeds 30% of total."
+    }
+  },
+  "ei_frequency_analysis": {
+    "excitatory_peak_frequency_hz": {
+      "value": 0.4,
+      "summary": "Peak oscillation frequency of excitatory neuron population. Comparing E vs I peak frequencies reveals whether populations oscillate at the same or different frequencies."
+    },
+    "inhibitory_peak_frequency_hz": {
+      "value": 0.4,
+      "summary": "Peak oscillation frequency of inhibitory neuron population. Inhibitory interneurons often show faster intrinsic frequencies than excitatory neurons."
+    },
+    "exc_is_gamma": {
+      "value": false,
+      "summary": "Whether excitatory population oscillates in the gamma band."
+    },
+    "inh_is_gamma": {
+      "value": false,
+      "summary": "Whether inhibitory population oscillates in the gamma band."
+    }
+  },
+  "ei_synchrony_analysis": {
+    "excitatory_burst_index": {
+      "value": 2.2824152827507054,
+      "summary": "Burst index for excitatory neurons (total spikes / unique neurons per bin). Value of 1.0 means each neuron fires once per bin (population synchrony). Values >1.0 indicate individual neurons fire multiple times per bin (bursting behavior)."
+    },
+    "inhibitory_burst_index": {
+      "value": 3.565539377921978,
+      "summary": "Burst index for inhibitory neurons. Higher values indicate more bursting behavior in the inhibitory population."
+    },
+    "reference_bin_ms": {
+      "value": 10,
+      "summary": "Time bin size (ms) used for the reference burst index calculation. Larger bins can capture more refractory period violations."
+    }
+  },
+  "inhibitory_effects_analysis": {
+    "ie_connection_count": {
+      "value": 1339416,
+      "summary": "Number of inhibitory-to-excitatory (I\u2192E) synaptic connections. These connections mediate feedforward and feedback inhibition of excitatory neurons."
+    },
+    "ii_connection_count": {
+      "value": 168698,
+      "summary": "Number of inhibitory-to-inhibitory (I\u2192I) synaptic connections. These connections mediate disinhibition and inhibitory network dynamics."
+    },
+    "ie_mean_weight": {
+      "value": -0.1500842773463638,
+      "summary": "Mean synaptic weight of I\u2192E connections (negative values indicate inhibition). Stronger inhibition helps prevent runaway excitation."
+    },
+    "ii_mean_weight": {
+      "value": -0.10493813717760739,
+      "summary": "Mean synaptic weight of I\u2192I connections. Self-inhibition among interneurons regulates the timing of inhibitory outputs."
+    },
+    "ie_per_target": {
+      "value": 280.8,
+      "summary": "Average number of inhibitory inputs each excitatory neuron receives. Higher values mean stronger inhibitory control."
+    },
+    "ii_per_target": {
+      "value": 137.1528455284553,
+      "summary": "Average number of inhibitory inputs each inhibitory neuron receives."
+    },
+    "e_neurons_tracked": {
+      "value": 10,
+      "summary": "Number of excitatory neurons whose conductance dynamics were tracked during simulation."
+    },
+    "e_neuron_mean_total_g_i": {
+      "value": 244368.80083033556,
+      "summary": "Time-integrated mean inhibitory conductance received by tracked excitatory neurons. Indicates total inhibitory drive over the simulation."
+    },
+    "i_neurons_tracked": {
+      "value": 10,
+      "summary": "Number of inhibitory neurons whose conductance dynamics were tracked during simulation."
+    },
+    "i_neuron_mean_total_g_i": {
+      "value": 74072.77404433055,
+      "summary": "Time-integrated mean inhibitory conductance received by tracked inhibitory neurons."
+    }
+  },
+  "experiment_configuration": {
+    "description": "These are the configured/predicted parameters that were set before running the simulation.",
+    "parameters": {
+      "n_neurons": 6000,
+      "connection_p": 0.1,
+      "connection_probabilities": {
+        "ee": 0.12,
+        "ei": 0.15,
+        "ie": 0.25,
+        "ii": 0.15
+      },
+      "weight_scale": 0.6,
+      "duration": 2500,
+      "dt": 0.1,
+      "stim_interval": 500,
+      "stim_interval_strength": 10,
+      "stim_fraction": 0.1,
+      "transmission_delay": 1,
+      "inhibitory_fraction": 0.2,
+      "stochastic_stim": false,
+      "layout": "sphere",
+      "no_stimulation": false,
+      "enable_noise": true,
+      "v_noise_amp": 0.1,
+      "i_noise_amp": 0.001,
+      "e_reversal": 0.0,
+      "i_reversal": -80.0,
+      "random_seed": 42,
+      "distance_lambda": 0.2,
+      "lambda_decay_ie": 0.15,
+      "animate": true,
+      "max_animation_frames": 2500,
+      "current_injection_stimulation": false,
+      "current_injection_duration": 200,
+      "poisson_process_stimulation": true,
+      "poisson_process_probability": 0.005,
+      "poisson_process_duration": 2000,
+      "jitter_v_rest": 3.0,
+      "jitter_v_threshold": 2.5,
+      "jitter_tau_m": 0.3,
+      "jitter_tau_ref": 0.1,
+      "jitter_tau_e": 0.3,
+      "jitter_tau_i": 0.3,
+      "jitter_adaptation_increment": 0.4,
+      "jitter_tau_adaptation": 0.35,
+      "stim_location": "top_down",
+      "implementation": "vectorized"
+    }
+  }
+}
